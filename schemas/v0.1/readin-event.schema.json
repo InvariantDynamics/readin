@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.readin.dev/v0.1/readin-event.schema.json",
   "title": "READIN Event v0.1",
-  "description": "Closed event envelope for the READIN Phase 0 local ledger.",
+  "description": "Closed event envelope for the READIN Phase 0 through Phase 2 local ledger.",
   "type": "object",
   "required": [
     "schema_version",
@@ -21,7 +21,13 @@
         "asset.tracking_started",
         "observer_frame.registered",
         "evidence.manifested",
-        "observation.admitted"
+        "observation.admitted",
+        "evidence.dependency_declared",
+        "claim.created",
+        "evidence.linked",
+        "relation.created",
+        "entity.resolution_candidate_recorded",
+        "entity.resolution_candidate_assessed"
       ]
     },
     "occurred_at": { "$ref": "#/$defs/timestamp" },
@@ -72,6 +78,70 @@
       },
       "then": {
         "properties": { "payload": { "$ref": "#/$defs/observationAdmittedPayload" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "evidence.dependency_declared" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/evidenceDependencyDeclaredPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "claim.created" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": { "payload": { "$ref": "#/$defs/claimCreatedPayload" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "evidence.linked" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": { "payload": { "$ref": "#/$defs/evidenceLinkedPayload" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "relation.created" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": { "payload": { "$ref": "#/$defs/relationCreatedPayload" } }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": { "const": "entity.resolution_candidate_recorded" }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/resolutionCandidateRecordedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": { "const": "entity.resolution_candidate_assessed" }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/resolutionCandidateAssessedPayload" }
+        }
       }
     }
   ],
@@ -483,6 +553,439 @@
       "type": "object",
       "required": ["observation"],
       "properties": { "observation": { "$ref": "#/$defs/observation" } },
+      "additionalProperties": false
+    },
+    "evidenceDependency": {
+      "type": "object",
+      "required": [
+        "id",
+        "dependency_group_id",
+        "ancestor_evidence_id",
+        "descendant_evidence_id",
+        "relationship",
+        "verification_status",
+        "basis",
+        "declared_at",
+        "independence_disposition"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "dependency_group_id": { "$ref": "#/$defs/uuid" },
+        "ancestor_evidence_id": { "$ref": "#/$defs/uuid" },
+        "descendant_evidence_id": { "$ref": "#/$defs/uuid" },
+        "relationship": {
+          "enum": [
+            "DERIVED_FROM",
+            "CITES",
+            "SUMMARIZES",
+            "REPRODUCES",
+            "TRANSFORMS",
+            "UNKNOWN_SHARED_ANCESTRY"
+          ]
+        },
+        "verification_status": {
+          "enum": ["ASSERTED_NOT_VERIFIED", "VERIFIED_FROM_MANIFEST"]
+        },
+        "basis": {
+          "type": "object",
+          "required": ["method", "notes"],
+          "properties": {
+            "method": {
+              "enum": [
+                "MANIFEST_TRANSFORMATION",
+                "EXPLICIT_CITATION",
+                "CONTENT_LINEAGE",
+                "SOURCE_DISCLOSURE",
+                "USER_ASSERTED"
+              ]
+            },
+            "notes": { "type": "string", "minLength": 1, "maxLength": 2048 }
+          },
+          "additionalProperties": false
+        },
+        "declared_at": { "$ref": "#/$defs/timestamp" },
+        "independence_disposition": { "const": "DEPENDENT" }
+      },
+      "additionalProperties": false
+    },
+    "evidenceDependencyDeclaredPayload": {
+      "type": "object",
+      "required": ["dependency"],
+      "properties": { "dependency": { "$ref": "#/$defs/evidenceDependency" } },
+      "additionalProperties": false
+    },
+    "claimObject": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "entity_id"],
+          "properties": {
+            "kind": { "const": "ENTITY" },
+            "entity_id": { "$ref": "#/$defs/uuid" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "LITERAL" },
+            "value": { "type": ["string", "number", "boolean", "null"] }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "temporalScope": {
+      "type": "object",
+      "required": ["valid_from", "valid_until"],
+      "properties": {
+        "valid_from": { "$ref": "#/$defs/nullableTimestamp" },
+        "valid_until": { "$ref": "#/$defs/nullableTimestamp" }
+      },
+      "additionalProperties": false
+    },
+    "claim": {
+      "type": "object",
+      "required": [
+        "id",
+        "subject",
+        "predicate",
+        "object",
+        "temporal_scope",
+        "spatial_scope",
+        "derived_from",
+        "modality",
+        "epistemic_status",
+        "invalidation_conditions",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "subject": { "$ref": "#/$defs/uuid" },
+        "predicate": { "type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,127}$" },
+        "object": { "$ref": "#/$defs/claimObject" },
+        "temporal_scope": { "$ref": "#/$defs/temporalScope" },
+        "spatial_scope": { "type": "null" },
+        "derived_from": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "modality": {
+          "enum": [
+            "asserted",
+            "inferred",
+            "predicted",
+            "hypothetical",
+            "counterfactual",
+            "disputed"
+          ]
+        },
+        "epistemic_status": { "const": "unresolved" },
+        "invalidation_conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "uniqueItems": true
+        },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "claimCreatedPayload": {
+      "type": "object",
+      "required": ["claim"],
+      "properties": { "claim": { "$ref": "#/$defs/claim" } },
+      "additionalProperties": false
+    },
+    "warrant": {
+      "type": "object",
+      "required": ["status", "statement", "basis"],
+      "properties": {
+        "status": { "enum": ["NOT_PROVIDED", "PROVIDED"] },
+        "statement": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 4096 },
+            { "type": "null" }
+          ]
+        },
+        "basis": {
+          "oneOf": [
+            {
+              "enum": [
+                "DIRECT_SOURCE_REPORT",
+                "DOCUMENTARY_RECORD",
+                "INFERENTIAL_CHAIN",
+                "CONTEXTUAL_CONSTRAINT"
+              ]
+            },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "appraisal": {
+      "type": "object",
+      "required": ["status", "method", "notes"],
+      "properties": {
+        "status": { "enum": ["NOT_APPRAISED", "APPRAISED"] },
+        "method": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 256 },
+            { "type": "null" }
+          ]
+        },
+        "notes": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 2048 },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidenceStrength": {
+      "type": "object",
+      "required": ["status", "ordinal"],
+      "properties": {
+        "status": { "enum": ["UNASSESSED", "ASSESSED"] },
+        "ordinal": {
+          "oneOf": [
+            { "enum": ["WEAK", "MODERATE", "STRONG"] },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidenceLink": {
+      "type": "object",
+      "required": [
+        "id",
+        "evidence_id",
+        "claim_id",
+        "role",
+        "dependency_group",
+        "warrant",
+        "appraisal",
+        "strength",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "evidence_id": { "$ref": "#/$defs/uuid" },
+        "claim_id": { "$ref": "#/$defs/uuid" },
+        "role": {
+          "enum": [
+            "supports",
+            "challenges",
+            "contextualizes",
+            "constrains",
+            "derives",
+            "contradicts"
+          ]
+        },
+        "dependency_group": { "$ref": "#/$defs/nullableUuid" },
+        "warrant": { "$ref": "#/$defs/warrant" },
+        "appraisal": { "$ref": "#/$defs/appraisal" },
+        "strength": { "$ref": "#/$defs/evidenceStrength" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "evidenceLinkedPayload": {
+      "type": "object",
+      "required": ["evidence_link"],
+      "properties": { "evidence_link": { "$ref": "#/$defs/evidenceLink" } },
+      "additionalProperties": false
+    },
+    "relation": {
+      "type": "object",
+      "required": [
+        "id",
+        "source_entity",
+        "relation_type",
+        "relation_semantics",
+        "target_entity",
+        "valid_from",
+        "valid_until",
+        "claims",
+        "confidence_state",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "source_entity": { "$ref": "#/$defs/uuid" },
+        "relation_type": { "type": "string", "pattern": "^[A-Z][A-Z0-9_?]{0,63}$" },
+        "relation_semantics": {
+          "enum": ["DESCRIPTIVE", "ASSOCIATION", "CAUSAL_HYPOTHESIS"]
+        },
+        "target_entity": { "$ref": "#/$defs/uuid" },
+        "valid_from": { "$ref": "#/$defs/nullableTimestamp" },
+        "valid_until": { "$ref": "#/$defs/nullableTimestamp" },
+        "claims": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "confidence_state": {
+          "type": "object",
+          "required": ["status", "rationale"],
+          "properties": {
+            "status": { "const": "UNASSESSED" },
+            "rationale": { "type": "null" }
+          },
+          "additionalProperties": false
+        },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "relationCreatedPayload": {
+      "type": "object",
+      "required": ["relation"],
+      "properties": { "relation": { "$ref": "#/$defs/relation" } },
+      "additionalProperties": false
+    },
+    "resolutionSignal": {
+      "type": "object",
+      "required": [
+        "kind",
+        "polarity",
+        "verification_status",
+        "statement",
+        "observation_id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "SHARED_ALIAS",
+            "SHARED_EXTERNAL_ID",
+            "ATTRIBUTE_SIMILARITY",
+            "OBSERVATION_REFERENCE",
+            "USER_ASSERTION",
+            "CONTRADICTION"
+          ]
+        },
+        "polarity": {
+          "enum": ["SUPPORTS_CANDIDACY", "CHALLENGES_CANDIDACY"]
+        },
+        "verification_status": {
+          "enum": [
+            "ASSERTED_NOT_VERIFIED",
+            "REFERENCE_VALIDATED",
+            "ENTITY_RECORD_VALIDATED"
+          ]
+        },
+        "statement": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "observation_id": { "$ref": "#/$defs/nullableUuid" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "OBSERVATION_REFERENCE" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": { "observation_id": { "$ref": "#/$defs/uuid" } }
+          },
+          "else": {
+            "properties": { "observation_id": { "type": "null" } }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "resolutionCandidate": {
+      "type": "object",
+      "required": [
+        "id",
+        "left_entity_id",
+        "right_entity_id",
+        "candidate_relation",
+        "signals",
+        "status",
+        "automatic_merge",
+        "merge_state",
+        "recorded_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "left_entity_id": { "$ref": "#/$defs/uuid" },
+        "right_entity_id": { "$ref": "#/$defs/uuid" },
+        "candidate_relation": { "const": "POSSIBLE_SAME_ENTITY" },
+        "signals": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/resolutionSignal" },
+          "uniqueItems": true
+        },
+        "status": { "const": "PENDING_REVIEW" },
+        "automatic_merge": { "const": false },
+        "merge_state": { "const": "NOT_MERGED" },
+        "recorded_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "resolutionCandidateRecordedPayload": {
+      "type": "object",
+      "required": ["resolution_candidate"],
+      "properties": {
+        "resolution_candidate": { "$ref": "#/$defs/resolutionCandidate" }
+      },
+      "additionalProperties": false
+    },
+    "manualReviewer": {
+      "type": "object",
+      "required": ["mode", "label"],
+      "properties": {
+        "mode": { "const": "MANUAL" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 256 }
+      },
+      "additionalProperties": false
+    },
+    "resolutionAssessment": {
+      "type": "object",
+      "required": [
+        "id",
+        "candidate_id",
+        "disposition",
+        "rationale",
+        "reviewer",
+        "supersedes_assessment_id",
+        "automatic_merge",
+        "merge_state",
+        "assessed_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "candidate_id": { "$ref": "#/$defs/uuid" },
+        "disposition": {
+          "enum": [
+            "POSSIBLE_MATCH",
+            "RETAIN_SEPARATE",
+            "REJECTED_AS_MATCH",
+            "CONFIRMED_MATCH_NOT_MERGED"
+          ]
+        },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "reviewer": { "$ref": "#/$defs/manualReviewer" },
+        "supersedes_assessment_id": { "$ref": "#/$defs/nullableUuid" },
+        "automatic_merge": { "const": false },
+        "merge_state": { "const": "NOT_MERGED" },
+        "assessed_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "resolutionCandidateAssessedPayload": {
+      "type": "object",
+      "required": ["resolution_assessment"],
+      "properties": {
+        "resolution_assessment": { "$ref": "#/$defs/resolutionAssessment" }
+      },
       "additionalProperties": false
     }
   }

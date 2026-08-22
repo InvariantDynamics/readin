@@ -27,19 +27,29 @@ OFS (optional)
 READIN remains useful without OFS. It will integrate with OFS only through accepted immutable
 contracts and receipts; it does not redefine OFS Core.
 
-## First executable slice
+## Current executable slice
 
-The current foundation implements one local epistemic loop:
+The current foundation and bounded Array slices implement one local epistemic loop:
 
 1. Create a typed entity and start tracking it as an asset.
 2. Register an observer frame.
 3. Manifest an immutable source artifact with its digest and access policy.
 4. Admit an immutable observation from that frame and artifact.
-5. Append all changes to a schema-validated event ledger.
-6. Replay the ledger into an inspectable asset view.
+5. Declare evidence ancestry so repeated derivatives cannot masquerade as independent support.
+6. Create a typed, unresolved claim derived from admitted observations.
+7. Link supporting, challenging, or contextual evidence with separate warrant, appraisal, and
+   strength fields.
+8. Create a typed entity relation backed by a claim.
+9. Append all changes to a schema-validated event ledger.
+10. Replay the ledger into an inspectable asset view or a hindsight-labeled historical timeline.
+11. Record a possible same-entity candidate with supporting and challenging signals.
+12. Append manual assessments without merging or mutating either entity.
 
 This slice uses manual, synthetic input only. It performs no network collection, entity merging,
-claim extraction, model inference, prediction, targeting, or external action.
+automated claim extraction, model inference, prediction, targeting, or external action. A claim
+remains unresolved even when evidence is linked, and repeated dependent evidence is never counted
+as independent corroboration. Candidate resolution is review history only: it never performs a
+canonical entity merge.
 
 ## Quick start
 
@@ -59,6 +69,8 @@ uv run readin create-entity --ledger .readin/events.jsonl \
   --type Organization --name "Example Research Cooperative"
 uv run readin register-frame --ledger .readin/events.jsonl \
   --name "Public filings" --class regulatory_filing
+uv run readin show-timeline --ledger .readin/events.jsonl \
+  --asset <entity-id> --mode AS_KNOWN_THEN
 ```
 
 Commands emit JSON so their identifiers can be captured by scripts. Run `uv run readin --help` for
@@ -81,8 +93,8 @@ See [Architecture](docs/architecture-v0.1.md), [Contributing](CONTRIBUTING.md), 
 ## Status
 
 Pre-alpha. Contract conformance and local tests establish only that this reference slice behaves as
-specified. They do not establish intelligence accuracy, source independence, scientific validity,
-operational readiness, or action authority.
+specified. They do not establish claim truth, intelligence accuracy, source independence,
+scientific validity, operational readiness, or action authority.
 
 ## License
 

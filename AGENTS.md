@@ -28,18 +28,27 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The initial slice is local-first and manual-input only:
+The Phase 0 through bounded Phase 2 slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
 - immutable observation admission;
+- unresolved claim creation from admitted observations;
+- typed entity relations backed by claims;
+- evidence polarity, warrant, appraisal, and strength as separate axes;
+- explicit evidence-dependency groups with cycle rejection;
+- asset state-version history and hindsight-labeled reconstruction;
+- reversible possible-identity candidates with polarity-preserving signals;
+- append-only manual candidate assessments with explicit supersession;
 - append-only JSONL event persistence;
 - deterministic asset-state replay;
 - schema validation and fail-closed referential checks.
 
-No live adapters, credentials, network acquisition, automated entity merge, claim extraction,
-model inference, forecast, external database, service deployment, or autonomous action exists in
-this slice.
+No live adapters, credentials, network acquisition, entity merge, automated claim
+extraction, model inference, forecast, external database, service deployment, or autonomous action
+exists in this slice. Resolution assessments never mutate canonical entity identity. Claims,
+relations, and candidate dispositions are manually recorded epistemic objects, not machine truth
+determinations.
 
 ## Contract changes
 

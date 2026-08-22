@@ -1,4 +1,4 @@
-"""Typed event factories for the READIN Phase 0 contract."""
+"""Typed event factories for the READIN Phase 0 through Phase 2 contracts."""
 
 from __future__ import annotations
 
@@ -268,6 +268,228 @@ def create_observation_admitted(
     return _event(
         "observation.admitted",
         {"observation": observation},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_evidence_dependency_declared(
+    dependency_group_id: str | UUID,
+    ancestor_evidence_id: str | UUID,
+    descendant_evidence_id: str | UUID,
+    relationship: str,
+    *,
+    verification_status: str = "ASSERTED_NOT_VERIFIED",
+    basis_method: str = "USER_ASSERTED",
+    basis_notes: str = "Dependency asserted by the recording user",
+    dependency_id: str | UUID | None = None,
+    declared_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    dependency = {
+        "id": _uuid(dependency_id),
+        "dependency_group_id": _uuid(dependency_group_id),
+        "ancestor_evidence_id": _uuid(ancestor_evidence_id),
+        "descendant_evidence_id": _uuid(descendant_evidence_id),
+        "relationship": relationship,
+        "verification_status": verification_status,
+        "basis": {"method": basis_method, "notes": basis_notes},
+        "declared_at": _timestamp(declared_at or event_time),
+        "independence_disposition": "DEPENDENT",
+    }
+    return _event(
+        "evidence.dependency_declared",
+        {"dependency": dependency},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_claim_created(
+    subject: str | UUID,
+    predicate: str,
+    claim_object: Mapping[str, Any],
+    derived_from: Iterable[str | UUID],
+    *,
+    modality: str = "asserted",
+    valid_from: str | datetime | None = None,
+    valid_until: str | datetime | None = None,
+    invalidation_conditions: Iterable[str] = (),
+    claim_id: str | UUID | None = None,
+    created_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    claim = {
+        "id": _uuid(claim_id),
+        "subject": _uuid(subject),
+        "predicate": predicate,
+        "object": dict(claim_object),
+        "temporal_scope": {
+            "valid_from": _timestamp(valid_from) if valid_from else None,
+            "valid_until": _timestamp(valid_until) if valid_until else None,
+        },
+        "spatial_scope": None,
+        "derived_from": [_uuid(item) for item in derived_from],
+        "modality": modality,
+        "epistemic_status": "unresolved",
+        "invalidation_conditions": list(invalidation_conditions),
+        "created_at": _timestamp(created_at or event_time),
+    }
+    return _event(
+        "claim.created",
+        {"claim": claim},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_evidence_linked(
+    evidence_id: str | UUID,
+    claim_id: str | UUID,
+    role: str,
+    *,
+    dependency_group: str | UUID | None = None,
+    warrant_statement: str | None = None,
+    warrant_basis: str | None = None,
+    appraisal_status: str = "NOT_APPRAISED",
+    appraisal_method: str | None = None,
+    appraisal_notes: str | None = None,
+    strength_status: str = "UNASSESSED",
+    strength_ordinal: str | None = None,
+    link_id: str | UUID | None = None,
+    created_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    evidence_link = {
+        "id": _uuid(link_id),
+        "evidence_id": _uuid(evidence_id),
+        "claim_id": _uuid(claim_id),
+        "role": role,
+        "dependency_group": _uuid(dependency_group) if dependency_group else None,
+        "warrant": {
+            "status": "PROVIDED" if warrant_statement is not None else "NOT_PROVIDED",
+            "statement": warrant_statement,
+            "basis": warrant_basis,
+        },
+        "appraisal": {
+            "status": appraisal_status,
+            "method": appraisal_method,
+            "notes": appraisal_notes,
+        },
+        "strength": {
+            "status": strength_status,
+            "ordinal": strength_ordinal,
+        },
+        "created_at": _timestamp(created_at or event_time),
+    }
+    return _event(
+        "evidence.linked",
+        {"evidence_link": evidence_link},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_relation_created(
+    source_entity: str | UUID,
+    relation_type: str,
+    target_entity: str | UUID,
+    claims: Iterable[str | UUID],
+    *,
+    relation_semantics: str = "DESCRIPTIVE",
+    valid_from: str | datetime | None = None,
+    valid_until: str | datetime | None = None,
+    relation_id: str | UUID | None = None,
+    created_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    relation = {
+        "id": _uuid(relation_id),
+        "source_entity": _uuid(source_entity),
+        "relation_type": relation_type,
+        "relation_semantics": relation_semantics,
+        "target_entity": _uuid(target_entity),
+        "valid_from": _timestamp(valid_from) if valid_from else None,
+        "valid_until": _timestamp(valid_until) if valid_until else None,
+        "claims": [_uuid(item) for item in claims],
+        "confidence_state": {"status": "UNASSESSED", "rationale": None},
+        "created_at": _timestamp(created_at or event_time),
+    }
+    return _event(
+        "relation.created",
+        {"relation": relation},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_resolution_candidate_recorded(
+    left_entity_id: str | UUID,
+    right_entity_id: str | UUID,
+    signals: Iterable[Mapping[str, Any]],
+    *,
+    candidate_id: str | UUID | None = None,
+    recorded_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    candidate = {
+        "id": _uuid(candidate_id),
+        "left_entity_id": _uuid(left_entity_id),
+        "right_entity_id": _uuid(right_entity_id),
+        "candidate_relation": "POSSIBLE_SAME_ENTITY",
+        "signals": [dict(item) for item in signals],
+        "status": "PENDING_REVIEW",
+        "automatic_merge": False,
+        "merge_state": "NOT_MERGED",
+        "recorded_at": _timestamp(recorded_at or event_time),
+    }
+    return _event(
+        "entity.resolution_candidate_recorded",
+        {"resolution_candidate": candidate},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_resolution_candidate_assessed(
+    candidate_id: str | UUID,
+    disposition: str,
+    rationale: str,
+    *,
+    reviewer_label: str = "local-user",
+    supersedes_assessment_id: str | UUID | None = None,
+    assessment_id: str | UUID | None = None,
+    assessed_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    assessment = {
+        "id": _uuid(assessment_id),
+        "candidate_id": _uuid(candidate_id),
+        "disposition": disposition,
+        "rationale": rationale,
+        "reviewer": {"mode": "MANUAL", "label": reviewer_label},
+        "supersedes_assessment_id": (
+            _uuid(supersedes_assessment_id) if supersedes_assessment_id else None
+        ),
+        "automatic_merge": False,
+        "merge_state": "NOT_MERGED",
+        "assessed_at": _timestamp(assessed_at or event_time),
+    }
+    return _event(
+        "entity.resolution_candidate_assessed",
+        {"resolution_assessment": assessment},
         event_id=event_id,
         occurred_at=event_time,
     )
