@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 reference runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 2 runtime."""
 
 from __future__ import annotations
 
@@ -11,22 +11,36 @@ from typing import Any
 
 from readin.contracts import ContractViolation
 from readin.events import (
+    create_claim_created,
     create_entity_created,
+    create_evidence_dependency_declared,
+    create_evidence_linked,
     create_evidence_manifested,
     create_observation_admitted,
     create_observer_frame_registered,
+    create_relation_created,
+    create_resolution_candidate_assessed,
+    create_resolution_candidate_recorded,
     create_tracking_started,
 )
 from readin.projection import ProjectionError
 from readin.store import EventLedger, LedgerError
 
 ACCESS_POLICIES = ("PUBLIC", "LICENSED", "USER_OWNED", "OTHERWISE_AUTHORIZED")
+RECONSTRUCTION_MODES = ("AS_KNOWN_THEN", "AS_RECONSTRUCTED_NOW")
 
 
 def _json_object(value: str) -> dict[str, Any]:
     parsed = json.loads(value)
     if not isinstance(parsed, dict):
         raise ValueError("expected a JSON object")
+    return parsed
+
+
+def _json_scalar(value: str) -> str | int | float | bool | None:
+    parsed = json.loads(value)
+    if isinstance(parsed, (dict, list)):
+        raise ValueError("expected a JSON scalar")
     return parsed
 
 
@@ -45,7 +59,7 @@ def _add_ledger_argument(parser: argparse.ArgumentParser) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="readin",
-        description="READIN Phase 0 local tracked-asset and observation runtime",
+        description="READIN local tracked-asset and inspectable Array runtime",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -111,9 +125,183 @@ def _build_parser() -> argparse.ArgumentParser:
     observation_parser.add_argument("--observation-id")
     observation_parser.add_argument("--supersedes")
 
+    dependency_parser = subparsers.add_parser(
+        "declare-dependency", help="Declare provenance-preserving evidence ancestry"
+    )
+    _add_ledger_argument(dependency_parser)
+    dependency_parser.add_argument("--group", required=True)
+    dependency_parser.add_argument("--ancestor", required=True)
+    dependency_parser.add_argument("--descendant", required=True)
+    dependency_parser.add_argument(
+        "--relationship",
+        required=True,
+        choices=(
+            "DERIVED_FROM",
+            "CITES",
+            "SUMMARIZES",
+            "REPRODUCES",
+            "TRANSFORMS",
+            "UNKNOWN_SHARED_ANCESTRY",
+        ),
+    )
+    dependency_parser.add_argument(
+        "--verification-status",
+        choices=("ASSERTED_NOT_VERIFIED", "VERIFIED_FROM_MANIFEST"),
+        default="ASSERTED_NOT_VERIFIED",
+    )
+    dependency_parser.add_argument(
+        "--basis-method",
+        choices=(
+            "MANIFEST_TRANSFORMATION",
+            "EXPLICIT_CITATION",
+            "CONTENT_LINEAGE",
+            "SOURCE_DISCLOSURE",
+            "USER_ASSERTED",
+        ),
+        default="USER_ASSERTED",
+    )
+    dependency_parser.add_argument(
+        "--basis-notes", default="Dependency asserted by the recording user"
+    )
+    dependency_parser.add_argument("--dependency-id")
+
+    claim_parser = subparsers.add_parser(
+        "create-claim", help="Create an unresolved claim derived from admitted observations"
+    )
+    _add_ledger_argument(claim_parser)
+    claim_parser.add_argument("--subject", required=True)
+    claim_parser.add_argument("--predicate", required=True)
+    claim_object = claim_parser.add_mutually_exclusive_group(required=True)
+    claim_object.add_argument("--object-entity")
+    claim_object.add_argument("--object-literal-json")
+    claim_parser.add_argument("--derived-from", required=True, action="append")
+    claim_parser.add_argument(
+        "--modality",
+        choices=(
+            "asserted",
+            "inferred",
+            "predicted",
+            "hypothetical",
+            "counterfactual",
+            "disputed",
+        ),
+        default="asserted",
+    )
+    claim_parser.add_argument("--valid-from")
+    claim_parser.add_argument("--valid-until")
+    claim_parser.add_argument("--invalidation-condition", action="append", default=[])
+    claim_parser.add_argument("--claim-id")
+
+    link_parser = subparsers.add_parser(
+        "link-evidence", help="Attach evidence, polarity, warrant, and appraisal to a claim"
+    )
+    _add_ledger_argument(link_parser)
+    link_parser.add_argument("--evidence", required=True)
+    link_parser.add_argument("--claim", required=True)
+    link_parser.add_argument(
+        "--role",
+        required=True,
+        choices=(
+            "supports",
+            "challenges",
+            "contextualizes",
+            "constrains",
+            "derives",
+            "contradicts",
+        ),
+    )
+    link_parser.add_argument("--dependency-group")
+    link_parser.add_argument("--warrant-statement")
+    link_parser.add_argument(
+        "--warrant-basis",
+        choices=(
+            "DIRECT_SOURCE_REPORT",
+            "DOCUMENTARY_RECORD",
+            "INFERENTIAL_CHAIN",
+            "CONTEXTUAL_CONSTRAINT",
+        ),
+    )
+    link_parser.add_argument(
+        "--appraisal-status", choices=("NOT_APPRAISED", "APPRAISED"), default="NOT_APPRAISED"
+    )
+    link_parser.add_argument("--appraisal-method")
+    link_parser.add_argument("--appraisal-notes")
+    link_parser.add_argument("--strength", choices=("WEAK", "MODERATE", "STRONG"))
+    link_parser.add_argument("--link-id")
+
+    relation_parser = subparsers.add_parser(
+        "create-relation", help="Create a typed temporal relation backed by claims"
+    )
+    _add_ledger_argument(relation_parser)
+    relation_parser.add_argument("--source", required=True)
+    relation_parser.add_argument("--type", required=True, dest="relation_type")
+    relation_parser.add_argument("--target", required=True)
+    relation_parser.add_argument("--claim", required=True, action="append")
+    relation_parser.add_argument(
+        "--semantics",
+        choices=("DESCRIPTIVE", "ASSOCIATION", "CAUSAL_HYPOTHESIS"),
+        default="DESCRIPTIVE",
+    )
+    relation_parser.add_argument("--valid-from")
+    relation_parser.add_argument("--valid-until")
+    relation_parser.add_argument("--relation-id")
+
+    candidate_parser = subparsers.add_parser(
+        "record-resolution-candidate",
+        help="Record a reversible possible identity match without merging entities",
+    )
+    _add_ledger_argument(candidate_parser)
+    candidate_parser.add_argument("--left", required=True)
+    candidate_parser.add_argument("--right", required=True)
+    candidate_parser.add_argument(
+        "--signal-json",
+        required=True,
+        action="append",
+        help="Closed resolution signal JSON object; repeat for multiple signals",
+    )
+    candidate_parser.add_argument("--candidate-id")
+
+    assessment_parser = subparsers.add_parser(
+        "assess-resolution-candidate",
+        help="Record a reversible manual assessment; never merges entities",
+    )
+    _add_ledger_argument(assessment_parser)
+    assessment_parser.add_argument("--candidate", required=True)
+    assessment_parser.add_argument(
+        "--disposition",
+        required=True,
+        choices=(
+            "POSSIBLE_MATCH",
+            "RETAIN_SEPARATE",
+            "REJECTED_AS_MATCH",
+            "CONFIRMED_MATCH_NOT_MERGED",
+        ),
+    )
+    assessment_parser.add_argument("--rationale", required=True)
+    assessment_parser.add_argument("--reviewer", default="local-user")
+    assessment_parser.add_argument("--supersedes")
+    assessment_parser.add_argument("--assessment-id")
+
     show_parser = subparsers.add_parser("show-asset", help="Replay and inspect one tracked asset")
     _add_ledger_argument(show_parser)
     show_parser.add_argument("--asset", required=True)
+    show_parser.add_argument("--mode", choices=RECONSTRUCTION_MODES, default="AS_KNOWN_THEN")
+    show_parser.add_argument("--epistemic-cutoff")
+
+    timeline_parser = subparsers.add_parser(
+        "show-timeline", help="Inspect a hindsight-labeled asset timeline"
+    )
+    _add_ledger_argument(timeline_parser)
+    timeline_parser.add_argument("--asset", required=True)
+    timeline_parser.add_argument("--mode", choices=RECONSTRUCTION_MODES, default="AS_KNOWN_THEN")
+    timeline_parser.add_argument("--epistemic-cutoff")
+
+    candidate_view_parser = subparsers.add_parser(
+        "show-resolution-candidate",
+        help="Inspect one candidate and its append-only assessment history",
+    )
+    _add_ledger_argument(candidate_view_parser)
+    candidate_view_parser.add_argument("--candidate", required=True)
 
     list_parser = subparsers.add_parser("list-assets", help="Replay and list the tracked catalog")
     _add_ledger_argument(list_parser)
@@ -206,9 +394,109 @@ def _run(args: argparse.Namespace) -> Any:
         ledger.append(event)
         return event
 
+    if args.command == "declare-dependency":
+        event = create_evidence_dependency_declared(
+            args.group,
+            args.ancestor,
+            args.descendant,
+            args.relationship,
+            verification_status=args.verification_status,
+            basis_method=args.basis_method,
+            basis_notes=args.basis_notes,
+            dependency_id=args.dependency_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "create-claim":
+        claim_object = (
+            {"kind": "ENTITY", "entity_id": args.object_entity}
+            if args.object_entity
+            else {"kind": "LITERAL", "value": _json_scalar(args.object_literal_json)}
+        )
+        event = create_claim_created(
+            args.subject,
+            args.predicate,
+            claim_object,
+            args.derived_from,
+            modality=args.modality,
+            valid_from=args.valid_from,
+            valid_until=args.valid_until,
+            invalidation_conditions=args.invalidation_condition,
+            claim_id=args.claim_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "link-evidence":
+        event = create_evidence_linked(
+            args.evidence,
+            args.claim,
+            args.role,
+            dependency_group=args.dependency_group,
+            warrant_statement=args.warrant_statement,
+            warrant_basis=args.warrant_basis,
+            appraisal_status=args.appraisal_status,
+            appraisal_method=args.appraisal_method,
+            appraisal_notes=args.appraisal_notes,
+            strength_status="ASSESSED" if args.strength else "UNASSESSED",
+            strength_ordinal=args.strength,
+            link_id=args.link_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "create-relation":
+        event = create_relation_created(
+            args.source,
+            args.relation_type,
+            args.target,
+            args.claim,
+            relation_semantics=args.semantics,
+            valid_from=args.valid_from,
+            valid_until=args.valid_until,
+            relation_id=args.relation_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "record-resolution-candidate":
+        event = create_resolution_candidate_recorded(
+            args.left,
+            args.right,
+            [_json_object(item) for item in args.signal_json],
+            candidate_id=args.candidate_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "assess-resolution-candidate":
+        event = create_resolution_candidate_assessed(
+            args.candidate,
+            args.disposition,
+            args.rationale,
+            reviewer_label=args.reviewer,
+            supersedes_assessment_id=args.supersedes,
+            assessment_id=args.assessment_id,
+        )
+        ledger.append(event)
+        return event
+
     projection = ledger.projection()
     if args.command == "show-asset":
-        return projection.asset_view(args.asset)
+        return projection.asset_view_at(
+            args.asset,
+            mode=args.mode,
+            epistemic_cutoff=args.epistemic_cutoff,
+        )
+    if args.command == "show-timeline":
+        return projection.timeline_view(
+            args.asset,
+            mode=args.mode,
+            epistemic_cutoff=args.epistemic_cutoff,
+        )
+    if args.command == "show-resolution-candidate":
+        return projection.resolution_candidate_view(args.candidate)
     if args.command == "list-assets":
         return projection.catalog_view()
     raise AssertionError(f"unhandled command: {args.command}")

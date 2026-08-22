@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from readin.projection import ProjectionError
 from readin.store import EventLedger, LedgerCorruption, LedgerExists, LedgerMissing
-from readin.synthetic import phase0_events
+from readin.synthetic import phase0_events, phase1_events
 
 
 def test_ledger_round_trip(tmp_path: Path) -> None:
@@ -27,6 +28,21 @@ def test_ledger_initialization_never_overwrites(tmp_path: Path) -> None:
     ledger.initialize()
     with pytest.raises(LedgerExists):
         ledger.initialize()
+
+
+def test_rejected_backdated_append_does_not_mutate_ledger(tmp_path: Path) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    events = phase1_events()
+    for event in events[:5]:
+        ledger.append(event)
+    changed = events[5]
+    changed["occurred_at"] = "2026-08-21T12:00:03Z"
+
+    with pytest.raises(ProjectionError, match="precedes the prior ledger event"):
+        ledger.append(changed)
+
+    assert ledger.read_events() == events[:5]
 
 
 def test_missing_ledger_fails_closed(tmp_path: Path) -> None:
