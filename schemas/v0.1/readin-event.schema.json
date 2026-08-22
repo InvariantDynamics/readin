@@ -1,0 +1,489 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.readin.dev/v0.1/readin-event.schema.json",
+  "title": "READIN Event v0.1",
+  "description": "Closed event envelope for the READIN Phase 0 local ledger.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "authority_state",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": { "const": "readin.event.v0.1" },
+    "event_id": { "$ref": "#/$defs/uuid" },
+    "event_type": {
+      "enum": [
+        "entity.created",
+        "asset.tracking_started",
+        "observer_frame.registered",
+        "evidence.manifested",
+        "observation.admitted"
+      ]
+    },
+    "occurred_at": { "$ref": "#/$defs/timestamp" },
+    "authority_state": { "const": "NO_AUTHORITY" },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "event_type": { "const": "entity.created" } },
+        "required": ["event_type"]
+      },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/entityCreatedPayload" } } }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "asset.tracking_started" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": { "payload": { "$ref": "#/$defs/assetTrackingStartedPayload" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "observer_frame.registered" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/observerFrameRegisteredPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "evidence.manifested" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": { "payload": { "$ref": "#/$defs/evidenceManifestedPayload" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "observation.admitted" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": { "payload": { "$ref": "#/$defs/observationAdmittedPayload" } }
+      }
+    }
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "nullableTimestamp": {
+      "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
+    },
+    "nullableUuid": {
+      "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
+    },
+    "accessPolicy": {
+      "enum": ["PUBLIC", "LICENSED", "USER_OWNED", "OTHERWISE_AUTHORIZED"]
+    },
+    "externalIdentifier": {
+      "type": "object",
+      "required": ["scheme", "value"],
+      "properties": {
+        "scheme": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 512 }
+      },
+      "additionalProperties": false
+    },
+    "entity": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "canonical_name",
+        "aliases",
+        "external_ids",
+        "attributes",
+        "created_at",
+        "status"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "type": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9_]{0,63}$" },
+        "canonical_name": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "uniqueItems": true
+        },
+        "external_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/externalIdentifier" },
+          "uniqueItems": true
+        },
+        "attributes": {
+          "description": "Explicit application-domain extension point.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "status": { "enum": ["active", "dormant", "archived"] }
+      },
+      "additionalProperties": false
+    },
+    "entityCreatedPayload": {
+      "type": "object",
+      "required": ["entity"],
+      "properties": { "entity": { "$ref": "#/$defs/entity" } },
+      "additionalProperties": false
+    },
+    "tracking": {
+      "type": "object",
+      "required": ["enabled", "priority", "collection_profile", "update_policy"],
+      "properties": {
+        "enabled": { "const": true },
+        "priority": { "type": "number", "minimum": 0, "maximum": 1 },
+        "collection_profile": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "update_policy": { "enum": ["manual", "poll", "stream"] }
+      },
+      "additionalProperties": false
+    },
+    "trackedAsset": {
+      "type": "object",
+      "required": [
+        "entity_id",
+        "tracking",
+        "scopes",
+        "active_hypotheses",
+        "active_scenarios",
+        "active_watches",
+        "epistemic_state_version"
+      ],
+      "properties": {
+        "entity_id": { "$ref": "#/$defs/uuid" },
+        "tracking": { "$ref": "#/$defs/tracking" },
+        "scopes": {
+          "type": "array",
+          "items": { "enum": ["observer_frame", "geography", "topic", "temporal"] },
+          "uniqueItems": true
+        },
+        "active_hypotheses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "active_scenarios": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "active_watches": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "epistemic_state_version": { "$ref": "#/$defs/uuid" }
+      },
+      "additionalProperties": false
+    },
+    "assetTrackingStartedPayload": {
+      "type": "object",
+      "required": ["tracked_asset"],
+      "properties": { "tracked_asset": { "$ref": "#/$defs/trackedAsset" } },
+      "additionalProperties": false
+    },
+    "accessProjection": {
+      "type": "object",
+      "required": ["scope", "description"],
+      "properties": {
+        "scope": { "$ref": "#/$defs/accessPolicy" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      },
+      "additionalProperties": false
+    },
+    "namedDescription": {
+      "type": "object",
+      "required": ["name", "description"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      },
+      "additionalProperties": false
+    },
+    "temporalCharacteristics": {
+      "type": "object",
+      "required": ["latency_class", "valid_time_available"],
+      "properties": {
+        "latency_class": {
+          "enum": [
+            "REAL_TIME",
+            "NEAR_REAL_TIME",
+            "HOURS",
+            "DAYS",
+            "MONTHS",
+            "VARIABLE",
+            "UNKNOWN"
+          ]
+        },
+        "valid_time_available": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "provenanceConstraints": {
+      "type": "object",
+      "required": ["source_identity_required", "dependency_ancestry_required"],
+      "properties": {
+        "source_identity_required": { "const": true },
+        "dependency_ancestry_required": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "observerFrame": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "class",
+        "access_projection",
+        "measurement_model",
+        "granularity",
+        "interpretation_model",
+        "temporal_characteristics",
+        "provenance_constraints",
+        "known_blind_regions",
+        "validity_conditions"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "class": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "access_projection": { "$ref": "#/$defs/accessProjection" },
+        "measurement_model": { "$ref": "#/$defs/namedDescription" },
+        "granularity": { "$ref": "#/$defs/namedDescription" },
+        "interpretation_model": { "$ref": "#/$defs/namedDescription" },
+        "temporal_characteristics": { "$ref": "#/$defs/temporalCharacteristics" },
+        "provenance_constraints": { "$ref": "#/$defs/provenanceConstraints" },
+        "known_blind_regions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "uniqueItems": true
+        },
+        "validity_conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "observerFrameRegisteredPayload": {
+      "type": "object",
+      "required": ["observer_frame"],
+      "properties": { "observer_frame": { "$ref": "#/$defs/observerFrame" } },
+      "additionalProperties": false
+    },
+    "evidenceSource": {
+      "type": "object",
+      "required": ["label", "uri"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "uri": {
+          "oneOf": [{ "type": "string", "format": "uri" }, { "type": "null" }]
+        }
+      },
+      "additionalProperties": false
+    },
+    "transformation": {
+      "type": "object",
+      "required": ["name", "version", "input_artifact_ids", "loss_assessment"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "input_artifact_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "loss_assessment": { "enum": ["LOSSLESS_VERIFIED", "LOSSY", "UNKNOWN"] }
+      },
+      "additionalProperties": false
+    },
+    "evidenceManifest": {
+      "type": "object",
+      "required": [
+        "id",
+        "sha256",
+        "media_type",
+        "size",
+        "acquired_at",
+        "source",
+        "license",
+        "access_policy",
+        "transformations",
+        "derivative_refs"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$"
+        },
+        "size": { "type": "integer", "minimum": 0 },
+        "acquired_at": { "$ref": "#/$defs/timestamp" },
+        "source": { "$ref": "#/$defs/evidenceSource" },
+        "license": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 256 },
+            { "type": "null" }
+          ]
+        },
+        "access_policy": { "$ref": "#/$defs/accessPolicy" },
+        "transformations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/transformation" }
+        },
+        "derivative_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidenceManifestedPayload": {
+      "type": "object",
+      "required": ["evidence_manifest"],
+      "properties": { "evidence_manifest": { "$ref": "#/$defs/evidenceManifest" } },
+      "additionalProperties": false
+    },
+    "observationContent": {
+      "type": "object",
+      "required": ["structured_payload"],
+      "properties": {
+        "structured_payload": {
+          "description": "Explicit adapter-domain extension point.",
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "observationProvenance": {
+      "type": "object",
+      "required": [
+        "collector",
+        "adapter",
+        "adapter_version",
+        "source_uri",
+        "source_policy",
+        "acquisition_time"
+      ],
+      "properties": {
+        "collector": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "adapter": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "source_uri": {
+          "oneOf": [{ "type": "string", "format": "uri" }, { "type": "null" }]
+        },
+        "source_policy": { "$ref": "#/$defs/accessPolicy" },
+        "acquisition_time": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "observationEpistemic": {
+      "type": "object",
+      "required": [
+        "resolution",
+        "uncertainty",
+        "access_scope",
+        "missingness_state",
+        "dependency_group_ids"
+      ],
+      "properties": {
+        "resolution": {
+          "oneOf": [
+            { "type": "number", "minimum": 0, "maximum": 1 },
+            { "type": "null" }
+          ]
+        },
+        "uncertainty": {
+          "description": "Explicit extension point; uncertainty is not one confidence score.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "access_scope": { "$ref": "#/$defs/accessPolicy" },
+        "missingness_state": {
+          "enum": [
+            "OBSERVED",
+            "ABSENT",
+            "UNOBSERVED",
+            "UNRECORDED",
+            "INACCESSIBLE",
+            "WITHHELD",
+            "DESTROYED",
+            "INCOMPARABLE",
+            "UNKNOWN"
+          ]
+        },
+        "dependency_group_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "observation": {
+      "type": "object",
+      "required": [
+        "id",
+        "subject_entities",
+        "observer_frame_id",
+        "source_artifact_id",
+        "supersedes_observation_id",
+        "observed_at",
+        "valid_from",
+        "valid_until",
+        "observation_type",
+        "content",
+        "provenance",
+        "epistemic",
+        "immutable"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "subject_entities": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "observer_frame_id": { "$ref": "#/$defs/uuid" },
+        "source_artifact_id": { "$ref": "#/$defs/uuid" },
+        "supersedes_observation_id": { "$ref": "#/$defs/nullableUuid" },
+        "observed_at": { "$ref": "#/$defs/timestamp" },
+        "valid_from": { "$ref": "#/$defs/nullableTimestamp" },
+        "valid_until": { "$ref": "#/$defs/nullableTimestamp" },
+        "observation_type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.-]{0,127}$"
+        },
+        "content": { "$ref": "#/$defs/observationContent" },
+        "provenance": { "$ref": "#/$defs/observationProvenance" },
+        "epistemic": { "$ref": "#/$defs/observationEpistemic" },
+        "immutable": { "const": true }
+      },
+      "additionalProperties": false
+    },
+    "observationAdmittedPayload": {
+      "type": "object",
+      "required": ["observation"],
+      "properties": { "observation": { "$ref": "#/$defs/observation" } },
+      "additionalProperties": false
+    }
+  }
+}

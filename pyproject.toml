@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "readin-intelligence"
+version = "0.1.0.dev0"
+description = "Provenance-preserving, multi-frame intelligence environment"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [
+  { name = "Invariant Dynamics" },
+]
+keywords = [
+  "epistemic-array",
+  "intelligence-analysis",
+  "osint",
+  "provenance",
+]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+  "jsonschema>=4.23,<5",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<10",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+readin = "readin.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/InvariantDynamics/readin"
+Repository = "https://github.com/InvariantDynamics/readin"
+Issues = "https://github.com/InvariantDynamics/readin/issues"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/readin"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas/v0.1" = "readin/schemas/v0.1"
