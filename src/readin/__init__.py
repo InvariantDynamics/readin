@@ -1,7 +1,9 @@
-"""READIN Phase 0 through Phase 2 reference runtime."""
+"""READIN Phase 0 through Phase 3 reference runtime."""
 
 from readin.contracts import ContractViolation, validate_event
 from readin.events import (
+    create_cartographic_query_planned,
+    create_cartographic_surface_registered,
     create_claim_created,
     create_entity_created,
     create_evidence_dependency_declared,
@@ -23,6 +25,8 @@ __all__ = [
     "LedgerError",
     "ProjectionError",
     "ReadinProjection",
+    "create_cartographic_query_planned",
+    "create_cartographic_surface_registered",
     "create_claim_created",
     "create_entity_created",
     "create_evidence_dependency_declared",
@@ -37,4 +41,4 @@ __all__ = [
     "validate_event",
 ]
 
-__version__ = "0.1.0.dev2"
+__version__ = "0.1.0.dev3"

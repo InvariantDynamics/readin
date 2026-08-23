@@ -28,7 +28,7 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 2 slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 3 slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -40,6 +40,9 @@ The Phase 0 through bounded Phase 2 slices are local-first and manual-input only
 - asset state-version history and hindsight-labeled reconstruction;
 - reversible possible-identity candidates with polarity-preserving signals;
 - append-only manual candidate assessments with explicit supersession;
+- observer-frame cartographic surfaces with explicit blind-region and non-coverage state;
+- persisted backward query plans with bounded relation traversal;
+- deterministic, read-only local-ledger query execution with query-lens hindsight labels;
 - append-only JSONL event persistence;
 - deterministic asset-state replay;
 - schema validation and fail-closed referential checks.
@@ -47,8 +50,9 @@ The Phase 0 through bounded Phase 2 slices are local-first and manual-input only
 No live adapters, credentials, network acquisition, entity merge, automated claim
 extraction, model inference, forecast, external database, service deployment, or autonomous action
 exists in this slice. Resolution assessments never mutate canonical entity identity. Claims,
-relations, and candidate dispositions are manually recorded epistemic objects, not machine truth
-determinations.
+relations, candidate dispositions, surfaces, and query plans are manually recorded epistemic
+objects, not machine truth determinations. A cartographic result never establishes source coverage
+or completeness, and execution cannot access the network.
 
 ## Contract changes
 

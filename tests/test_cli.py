@@ -5,7 +5,7 @@ from pathlib import Path
 
 from readin.cli import main
 from readin.store import EventLedger
-from readin.synthetic import phase1_events, phase2_events
+from readin.synthetic import phase1_events, phase2_events, phase3_events
 
 
 def test_cli_initializes_and_tracks_entity(tmp_path: Path, capsys: object) -> None:
@@ -146,3 +146,82 @@ def test_cli_records_and_assesses_candidate_without_merge(tmp_path: Path, capsys
     assert assessment["disposition"] == "CONFIRMED_MATCH_NOT_MERGED"
     assert assessment["automatic_merge"] is False
     assert assessment["merge_state"] == "NOT_MERGED"
+
+
+def test_cli_executes_persisted_cartographic_query_locally(tmp_path: Path, capsys: object) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase3_events():
+        ledger.append(event)
+
+    result = main(
+        [
+            "run-cartographic-query",
+            "--ledger",
+            str(ledger.path),
+            "--query",
+            "39393939-3939-4393-8393-393939393939",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+
+    assert result == 0
+    assert output["execution"]["state"] == "LOCAL_LEDGER_REPLAY"
+    assert output["execution"]["network_access"] is False
+    assert output["aperture"]["excluded_asset_observation_count"] == 1
+    assert output["query_lens"]["hindsight_in_query_lens"] is True
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_registers_surface_and_persists_backward_plan(tmp_path: Path, capsys: object) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase2_events():
+        ledger.append(event)
+
+    result = main(
+        [
+            "register-cartographic-surface",
+            "--ledger",
+            str(ledger.path),
+            "--name",
+            "CLI public-record surface",
+            "--description",
+            "One fixture observer frame",
+            "--frame",
+            "22222222-2222-4222-8222-222222222222",
+            "--blind-region-state",
+            "DECLARED",
+            "--blind-region",
+            "No independent operational verification",
+            "--surface-id",
+            "51515151-5151-4515-8515-515151515151",
+        ]
+    )
+    surface_output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert surface_output["event_type"] == "cartography.surface_registered"
+
+    result = main(
+        [
+            "plan-cartographic-query",
+            "--ledger",
+            str(ledger.path),
+            "--asset",
+            "11111111-1111-4111-8111-111111111111",
+            "--surface",
+            "51515151-5151-4515-8515-515151515151",
+            "--mode",
+            "AS_KNOWN_THEN",
+            "--epistemic-cutoff",
+            "2026-08-21T12:00:16Z",
+            "--query-id",
+            "52525252-5252-4525-8525-525252525252",
+        ]
+    )
+    query_output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    plan = query_output["payload"]["cartographic_query_plan"]
+    assert plan["direction"] == "BACKWARD"
+    assert plan["traversal"]["max_relation_hops"] == 1
+    assert plan["execution_state"] == "PLANNED_READ_ONLY"

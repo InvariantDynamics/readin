@@ -29,7 +29,8 @@ contracts and receipts; it does not redefine OFS Core.
 
 ## Current executable slice
 
-The current foundation and bounded Array slices implement one local epistemic loop:
+The current foundation, bounded Array, resolution, and cartography slices implement one local
+epistemic loop:
 
 1. Create a typed entity and start tracking it as an asset.
 2. Register an observer frame.
@@ -44,8 +45,14 @@ The current foundation and bounded Array slices implement one local epistemic lo
 10. Replay the ledger into an inspectable asset view or a hindsight-labeled historical timeline.
 11. Record a possible same-entity candidate with supporting and challenging signals.
 12. Append manual assessments without merging or mutating either entity.
+13. Register an observer-frame cartographic surface with explicit blind-region state.
+14. Persist a backward query plan with a selected surface, traversal bound, and reconstruction mode.
+15. Execute that plan deterministically against the local ledger while reporting aperture exclusions
+    and hindsight introduced by the query lens.
 
-This slice uses manual, synthetic input only. It performs no network collection, entity merging,
+This slice uses manual, synthetic input only. Cartographic execution is a read-only local replay;
+`coverage_state` remains `NOT_ESTABLISHED`, completeness is never claimed, and post-cutoff surface
+definitions are labeled as hindsight in the query lens. It performs no network collection, entity merging,
 automated claim extraction, model inference, prediction, targeting, or external action. A claim
 remains unresolved even when evidence is linked, and repeated dependent evidence is never counted
 as independent corroboration. Candidate resolution is review history only: it never performs a
@@ -71,6 +78,13 @@ uv run readin register-frame --ledger .readin/events.jsonl \
   --name "Public filings" --class regulatory_filing
 uv run readin show-timeline --ledger .readin/events.jsonl \
   --asset <entity-id> --mode AS_KNOWN_THEN
+uv run readin register-cartographic-surface --ledger .readin/events.jsonl \
+  --name "Public filings" --description "Registered public-filing frames" \
+  --frame <frame-id> --blind-region-state NOT_CHARACTERIZED
+uv run readin plan-cartographic-query --ledger .readin/events.jsonl \
+  --asset <entity-id> --surface <surface-id> --mode AS_KNOWN_THEN \
+  --epistemic-cutoff <ISO-8601-cutoff-at-or-after-tracking>
+uv run readin run-cartographic-query --ledger .readin/events.jsonl --query <query-id>
 ```
 
 Commands emit JSON so their identifiers can be captured by scripts. Run `uv run readin --help` for

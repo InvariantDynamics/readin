@@ -1,4 +1,4 @@
-"""Typed event factories for the READIN Phase 0 through Phase 2 contracts."""
+"""Typed event factories for the READIN Phase 0 through Phase 3 contracts."""
 
 from __future__ import annotations
 
@@ -490,6 +490,85 @@ def create_resolution_candidate_assessed(
     return _event(
         "entity.resolution_candidate_assessed",
         {"resolution_assessment": assessment},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_cartographic_surface_registered(
+    name: str,
+    description: str,
+    observer_frame_ids: Iterable[str | UUID],
+    *,
+    blind_region_state: str = "NOT_CHARACTERIZED",
+    blind_regions: Iterable[str] = (),
+    validity_conditions: Iterable[str] = (),
+    surface_id: str | UUID | None = None,
+    registered_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    surface = {
+        "id": _uuid(surface_id),
+        "name": name,
+        "description": description,
+        "surface_kind": "OBSERVER_FRAME_COMPOSITE",
+        "observer_frame_ids": [_uuid(item) for item in observer_frame_ids],
+        "blind_region_state": blind_region_state,
+        "blind_regions": list(blind_regions),
+        "validity_conditions": list(validity_conditions),
+        "coverage_state": "NOT_ESTABLISHED",
+        "registered_at": _timestamp(registered_at or event_time),
+    }
+    return _event(
+        "cartography.surface_registered",
+        {"cartographic_surface": surface},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_cartographic_query_planned(
+    asset_entity_id: str | UUID,
+    surface_ids: Iterable[str | UUID],
+    *,
+    reconstruction_mode: str = "AS_KNOWN_THEN",
+    epistemic_cutoff: str | datetime | None = None,
+    max_relation_hops: int = 1,
+    include_relations: bool = True,
+    query_id: str | UUID | None = None,
+    created_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    query_plan = {
+        "id": _uuid(query_id),
+        "asset_entity_id": _uuid(asset_entity_id),
+        "direction": "BACKWARD",
+        "surface_ids": [_uuid(item) for item in surface_ids],
+        "reconstruction": {
+            "mode": reconstruction_mode,
+            "epistemic_cutoff": _timestamp(epistemic_cutoff) if epistemic_cutoff else None,
+        },
+        "traversal": {
+            "max_relation_hops": max_relation_hops,
+            "include_observations": True,
+            "include_claims": True,
+            "include_evidence": True,
+            "include_dependencies": True,
+            "include_relations": include_relations,
+        },
+        "missingness_policy": "PRESERVE",
+        "conflict_policy": "PRESERVE",
+        "prediction_state": "NOT_REQUESTED",
+        "execution_state": "PLANNED_READ_ONLY",
+        "created_at": _timestamp(created_at or event_time),
+    }
+    return _event(
+        "cartography.query_planned",
+        {"cartographic_query_plan": query_plan},
         event_id=event_id,
         occurred_at=event_time,
     )

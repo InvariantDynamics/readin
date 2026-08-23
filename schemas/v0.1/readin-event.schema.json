@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.readin.dev/v0.1/readin-event.schema.json",
   "title": "READIN Event v0.1",
-  "description": "Closed event envelope for the READIN Phase 0 through Phase 2 local ledger.",
+  "description": "Closed event envelope for the READIN Phase 0 through Phase 3 local ledger.",
   "type": "object",
   "required": [
     "schema_version",
@@ -27,7 +27,9 @@
         "evidence.linked",
         "relation.created",
         "entity.resolution_candidate_recorded",
-        "entity.resolution_candidate_assessed"
+        "entity.resolution_candidate_assessed",
+        "cartography.surface_registered",
+        "cartography.query_planned"
       ]
     },
     "occurred_at": { "$ref": "#/$defs/timestamp" },
@@ -141,6 +143,28 @@
       "then": {
         "properties": {
           "payload": { "$ref": "#/$defs/resolutionCandidateAssessedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "cartography.surface_registered" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/cartographicSurfaceRegisteredPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "cartography.query_planned" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/cartographicQueryPlannedPayload" }
         }
       }
     }
@@ -985,6 +1009,127 @@
       "required": ["resolution_assessment"],
       "properties": {
         "resolution_assessment": { "$ref": "#/$defs/resolutionAssessment" }
+      },
+      "additionalProperties": false
+    },
+    "cartographicSurface": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "description",
+        "surface_kind",
+        "observer_frame_ids",
+        "blind_region_state",
+        "blind_regions",
+        "validity_conditions",
+        "coverage_state",
+        "registered_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "surface_kind": { "const": "OBSERVER_FRAME_COMPOSITE" },
+        "observer_frame_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "blind_region_state": { "enum": ["DECLARED", "NOT_CHARACTERIZED"] },
+        "blind_regions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "uniqueItems": true
+        },
+        "validity_conditions": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "uniqueItems": true
+        },
+        "coverage_state": { "const": "NOT_ESTABLISHED" },
+        "registered_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "cartographicSurfaceRegisteredPayload": {
+      "type": "object",
+      "required": ["cartographic_surface"],
+      "properties": {
+        "cartographic_surface": { "$ref": "#/$defs/cartographicSurface" }
+      },
+      "additionalProperties": false
+    },
+    "cartographicReconstruction": {
+      "type": "object",
+      "required": ["mode", "epistemic_cutoff"],
+      "properties": {
+        "mode": { "enum": ["AS_KNOWN_THEN", "AS_RECONSTRUCTED_NOW"] },
+        "epistemic_cutoff": { "$ref": "#/$defs/nullableTimestamp" }
+      },
+      "additionalProperties": false
+    },
+    "cartographicTraversal": {
+      "type": "object",
+      "required": [
+        "max_relation_hops",
+        "include_observations",
+        "include_claims",
+        "include_evidence",
+        "include_dependencies",
+        "include_relations"
+      ],
+      "properties": {
+        "max_relation_hops": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "include_observations": { "const": true },
+        "include_claims": { "const": true },
+        "include_evidence": { "const": true },
+        "include_dependencies": { "const": true },
+        "include_relations": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "cartographicQueryPlan": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "direction",
+        "surface_ids",
+        "reconstruction",
+        "traversal",
+        "missingness_policy",
+        "conflict_policy",
+        "prediction_state",
+        "execution_state",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "direction": { "const": "BACKWARD" },
+        "surface_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "reconstruction": { "$ref": "#/$defs/cartographicReconstruction" },
+        "traversal": { "$ref": "#/$defs/cartographicTraversal" },
+        "missingness_policy": { "const": "PRESERVE" },
+        "conflict_policy": { "const": "PRESERVE" },
+        "prediction_state": { "const": "NOT_REQUESTED" },
+        "execution_state": { "const": "PLANNED_READ_ONLY" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "cartographicQueryPlannedPayload": {
+      "type": "object",
+      "required": ["cartographic_query_plan"],
+      "properties": {
+        "cartographic_query_plan": { "$ref": "#/$defs/cartographicQueryPlan" }
       },
       "additionalProperties": false
     }
