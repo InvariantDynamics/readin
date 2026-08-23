@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 through Phase 5 runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 6 runtime."""
 
 from __future__ import annotations
 
@@ -40,6 +40,11 @@ from readin.scenarios import (
     execute_scenario,
 )
 from readin.store import EventLedger, LedgerError
+from readin.workbench import (
+    WorkbenchError,
+    build_workbench_snapshot,
+    serve_workbench,
+)
 
 ACCESS_POLICIES = ("PUBLIC", "LICENSED", "USER_OWNED", "OTHERWISE_AUTHORIZED")
 RECONSTRUCTION_MODES = ("AS_KNOWN_THEN", "AS_RECONSTRUCTED_NOW")
@@ -503,6 +508,21 @@ def _build_parser() -> argparse.ArgumentParser:
     list_parser = subparsers.add_parser("list-assets", help="Replay and list the tracked catalog")
     _add_ledger_argument(list_parser)
 
+    workbench_view_parser = subparsers.add_parser(
+        "show-workbench",
+        help="Emit the bounded read-only asset-workbench projection as JSON",
+    )
+    _add_ledger_argument(workbench_view_parser)
+    workbench_view_parser.add_argument("--asset")
+
+    workbench_parser = subparsers.add_parser(
+        "workbench",
+        help="Serve the read-only asset workbench on a loopback interface",
+    )
+    _add_ledger_argument(workbench_parser)
+    workbench_parser.add_argument("--host", default="127.0.0.1")
+    workbench_parser.add_argument("--port", type=int, default=4173)
+
     return parser
 
 
@@ -536,6 +556,13 @@ def _run(args: argparse.Namespace) -> Any:
             ledger.append(tracking_event)
             events.append(tracking_event)
         return {"entity_id": entity_id, "events": events, "authority_state": "NO_AUTHORITY"}
+
+    if args.command == "workbench":
+        serve_workbench(ledger.path, host=args.host, port=args.port)
+        return {
+            "status": "stopped",
+            "authority_state": "NO_AUTHORITY",
+        }
 
     if args.command == "start-tracking":
         event = create_tracking_started(
@@ -830,6 +857,8 @@ def _run(args: argparse.Namespace) -> Any:
         return projection.scenario_run_view(args.run)
     if args.command == "list-assets":
         return projection.catalog_view()
+    if args.command == "show-workbench":
+        return build_workbench_snapshot(projection, args.asset)
     raise AssertionError(f"unhandled command: {args.command}")
 
 
@@ -847,6 +876,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         LedgerError,
         ProjectionError,
         ScenarioRuntimeError,
+        WorkbenchError,
         ValueError,
     ) as error:
         print(f"readin: {error}", file=sys.stderr)

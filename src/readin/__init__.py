@@ -1,4 +1,4 @@
-"""READIN Phase 0 through Phase 5 reference runtime."""
+"""READIN Phase 0 through Phase 6 reference runtime."""
 
 from readin.belief import BeliefRuntimeError, execute_belief_revision
 from readin.contracts import ContractViolation, validate_event
@@ -36,6 +36,7 @@ from readin.scenarios import (
     execute_scenario,
 )
 from readin.store import EventLedger, LedgerError
+from readin.workbench import WorkbenchError, build_workbench_snapshot, create_workbench_server
 
 __all__ = [
     "ContractViolation",
@@ -46,6 +47,8 @@ __all__ = [
     "ProjectionError",
     "ReadinProjection",
     "ScenarioRuntimeError",
+    "WorkbenchError",
+    "build_workbench_snapshot",
     "create_belief_edge_created",
     "create_belief_revision_completed",
     "create_bounded_scenario",
@@ -68,10 +71,11 @@ __all__ = [
     "create_scenario_run_completed",
     "create_reference_fitter_registration",
     "create_tracking_started",
+    "create_workbench_server",
     "execute_reference_fitter_group",
     "execute_belief_revision",
     "execute_scenario",
     "validate_event",
 ]
 
-__version__ = "0.1.0.dev5"
+__version__ = "0.1.0.dev6"
