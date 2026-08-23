@@ -238,7 +238,8 @@ artifact storage and live acquisition are later gated work.
    admissibility/invalidity, partial groups, and preserved disagreement. *(implemented)*
 6. **Phase 5 scenario and belief engine** — dependency-aware categorical revisions and conditional
    branches without destiny claims. *(implemented)*
-7. **Phase 6 asset workbench** — dense operator interface over the inspectable epistemic field.
+7. **Phase 6 asset workbench** — dense operator interface over the inspectable epistemic field,
+   using a compact deterministic read model and loopback-only read server. *(implemented)*
 
 Each slice requires its own contract, positive and negative fixtures, validation path, claim ceiling,
 and stop conditions.

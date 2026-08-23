@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>READIN Asset Workbench</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand" aria-label="READIN">
+          <span class="brand-mark" aria-hidden="true">R</span>
+          <span class="brand-word">READIN</span>
+          <span class="brand-subtitle">Asset Workbench</span>
+        </div>
+        <div class="runtime-state">
+          <span class="runtime-dot" aria-hidden="true"></span>
+          Local ledger replay
+        </div>
+        <button class="icon-button" id="refresh-button" type="button" aria-label="Refresh ledger">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 6v5h-5M4 18v-5h5M18.2 9A7 7 0 0 0 6.6 6.6L4 9m16 6-2.6 2.4A7 7 0 0 1 5.8 15" />
+          </svg>
+        </button>
+      </header>
+
+      <div class="authority-strip" role="status">
+        <strong>NO_AUTHORITY</strong>
+        <span>Read-only local inspection</span>
+        <span>No collection</span>
+        <span>No prediction</span>
+        <span>No external action</span>
+      </div>
+
+      <aside class="catalog-panel" aria-label="Tracked asset catalog">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Catalog</span>
+            <h2>Tracked assets</h2>
+          </div>
+          <span class="count-badge" id="asset-count">0</span>
+        </div>
+        <label class="search-field">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="6"></circle>
+            <path d="m16 16 4 4"></path>
+          </svg>
+          <span class="sr-only">Filter assets</span>
+          <input id="asset-search" type="search" placeholder="Filter assets" autocomplete="off" />
+        </label>
+        <div class="asset-list" id="asset-list"></div>
+        <div class="catalog-footer">
+          <span>Source</span>
+          <strong>Immutable JSONL</strong>
+          <span>Writes</span>
+          <strong>Disabled</strong>
+        </div>
+      </aside>
+
+      <main class="workspace" id="workspace" aria-live="polite">
+        <section class="asset-header">
+          <div>
+            <div class="asset-kicker">
+              <span id="asset-type">—</span>
+              <span aria-hidden="true">/</span>
+              <span id="asset-id-short">—</span>
+            </div>
+            <h1 id="asset-name">Loading asset state…</h1>
+            <p id="asset-aliases">Replaying the local ledger.</p>
+          </div>
+          <div class="asset-state-stack">
+            <span class="state-label">Epistemic state</span>
+            <span class="state-value" id="state-version">—</span>
+          </div>
+        </section>
+
+        <section class="metric-strip" id="metric-strip" aria-label="Asset counts"></section>
+
+        <nav class="view-tabs" aria-label="Workbench views">
+          <button class="tab-button is-active" type="button" data-tab="overview">Overview</button>
+          <button class="tab-button" type="button" data-tab="claims">Claims</button>
+          <button class="tab-button" type="button" data-tab="evidence">Evidence</button>
+          <button class="tab-button" type="button" data-tab="relations">Relations</button>
+          <button class="tab-button" type="button" data-tab="belief">Belief</button>
+          <button class="tab-button" type="button" data-tab="scenarios">Scenarios</button>
+          <button class="tab-button" type="button" data-tab="timeline">Timeline</button>
+        </nav>
+
+        <section class="view-panel" id="view-panel"></section>
+      </main>
+
+      <aside class="inspection-panel" aria-label="Epistemic limits">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Boundary</span>
+            <h2>Responsible inference</h2>
+          </div>
+        </div>
+        <p class="boundary-answer">
+          This view reports what the local ledger contains, how observations depend on one another,
+          and where models abstain or remain invalid. It does not establish world-state truth.
+        </p>
+        <dl class="limit-list" id="limit-list"></dl>
+        <div class="inspection-note">
+          <span class="inspection-note-icon" aria-hidden="true">!</span>
+          <div>
+            <strong>Unknown remains visible</strong>
+            <p>Missing coverage, unmodeled branches, and fitter invalidity are retained.</p>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <template id="empty-state-template">
+      <div class="empty-state">
+        <span class="empty-glyph" aria-hidden="true">∅</span>
+        <h3>No records in this view</h3>
+        <p>The local ledger contains no corresponding records for this tracked asset.</p>
+      </div>
+    </template>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

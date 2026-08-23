@@ -28,7 +28,7 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 5 slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 6 slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -52,6 +52,8 @@ The Phase 0 through bounded Phase 5 slices are local-first and manual-input only
 - dependency-aware categorical belief revisions with no probability claim;
 - assumption- and intervention-bound scenario trees with a required unknown branch;
 - structural branch-antecedent evaluation without likelihoods or simulated trajectories;
+- deterministic read-only workbench projection over one replayed local ledger;
+- loopback-only static asset workbench with no write endpoint;
 - append-only JSONL event persistence;
 - deterministic asset-state replay;
 - schema validation and fail-closed referential checks.
@@ -67,6 +69,9 @@ readback, and no model or action authority. Belief states are categorical diagno
 not probabilities or truth determinations. Scenario interventions have `NOT_ESTABLISHED` causal
 status, the unmodeled region cannot be removed, and scenario execution performs no fitter forecast,
 likelihood assignment, trajectory simulation, prediction, or action.
+The Phase 6 workbench is a local presentation and replay surface only. It binds to loopback,
+refuses mutation methods, performs no authentication or remote service exposure, and does not add
+scientific, operational, surveillance, targeting, or action authority.
 
 ## Contract changes
 

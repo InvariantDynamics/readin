@@ -29,8 +29,8 @@ contracts and receipts; it does not redefine OFS Core.
 
 ## Current executable slice
 
-The current foundation, bounded Array, resolution, cartography, multi-fitter, belief, and scenario
-slices implement one local epistemic loop:
+The current foundation, bounded Array, resolution, cartography, multi-fitter, belief, scenario, and
+asset-workbench slices implement one local epistemic loop:
 
 1. Create a typed entity and start tracking it as an asset.
 2. Register an observer frame.
@@ -60,9 +60,13 @@ slices implement one local epistemic loop:
 22. Create an assumption- and intervention-bound scenario tree with a required unknown branch.
 23. Evaluate branch antecedents against one immutable belief revision without assigning likelihoods
     or simulating trajectories.
+24. Project the replayed ledger into a compact operator view that retains claim status, dependency
+    ancestry, blind regions, fitter invalidity, categorical belief state, and unknown branches.
+25. Inspect that projection through a loopback-only, read-only browser workbench.
 
 This slice uses manual, synthetic input only. Cartographic, fitter, belief, and scenario execution is
-local and deterministic; `coverage_state` remains `NOT_ESTABLISHED`, completeness is never claimed,
+local and deterministic; the workbench has no write endpoint and refuses non-loopback bindings.
+`coverage_state` remains `NOT_ESTABLISHED`, completeness is never claimed,
 and post-cutoff surface definitions are labeled as hindsight in the query lens. Fitter and scenario
 empirical validity is `NOT_ESTABLISHED`, residual readback is not performed, and Bayesian and belief
 outputs are explicitly diagnostic rather than truth probabilities. Scenario branches are
@@ -81,7 +85,12 @@ Install [uv](https://docs.astral.sh/uv/), then:
 uv sync --dev
 make check
 make demo
+make workbench
 ```
+
+`make workbench` creates the closed synthetic Phase 5 ledger in a temporary directory and serves
+the Phase 6 workbench at `http://127.0.0.1:4173`. It takes no external action and removes the
+temporary ledger when stopped.
 
 Or create a local ledger manually:
 
@@ -110,10 +119,12 @@ uv run readin show-belief-revision --ledger .readin/events.jsonl \
   --revision <belief-revision-id>
 uv run readin show-scenario-run --ledger .readin/events.jsonl \
   --run <scenario-run-id>
+uv run readin show-workbench --ledger .readin/events.jsonl --asset <entity-id>
+uv run readin workbench --ledger .readin/events.jsonl --host 127.0.0.1 --port 4173
 ```
 
-Commands emit JSON so their identifiers can be captured by scripts. Run `uv run readin --help` for
-the complete interface.
+Data commands emit JSON so their identifiers can be captured by scripts; `workbench` starts the
+local server until interrupted. Run `uv run readin --help` for the complete interface.
 
 ## Governing rules
 

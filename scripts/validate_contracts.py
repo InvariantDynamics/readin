@@ -10,6 +10,7 @@ from readin.contracts import ContractViolation, load_event_schema, validate_even
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
 from readin.synthetic import phase5_events
+from readin.workbench import WorkbenchError, build_workbench_snapshot, validate_loopback_host
 
 
 def _must_reject_contract(event: dict[str, object]) -> None:
@@ -209,6 +210,32 @@ def main() -> None:
     if scenario_view["prediction_state"] != "NOT_REQUESTED":
         raise AssertionError("scenario runtime promoted branch evaluation to prediction")
 
+    workbench = build_workbench_snapshot(projection, "11111111-1111-4111-8111-111111111111")
+    if workbench["authority"]["state"] != "NO_AUTHORITY":
+        raise AssertionError("workbench projection acquired action authority")
+    if workbench["epistemic_limits"]["coverage_state"] != "NOT_ESTABLISHED":
+        raise AssertionError("workbench projection promoted bounded aperture to coverage")
+    if workbench["selected_asset"]["fitters"]["latest_run"]["outcome_counts"]["INVALID"] != 1:
+        raise AssertionError("workbench projection suppressed fitter invalidity")
+    if not any(
+        branch["kind"] == "UNKNOWN_UNMODELED"
+        for branch in workbench["selected_asset"]["scenarios"][0]["branches"]
+    ):
+        raise AssertionError("workbench projection suppressed the unmodeled region")
+
+    try:
+        build_workbench_snapshot(projection, "unknown-asset")
+    except WorkbenchError:
+        pass
+    else:
+        raise AssertionError("workbench accepted an unknown asset")
+    try:
+        validate_loopback_host("0.0.0.0")
+    except WorkbenchError:
+        pass
+    else:
+        raise AssertionError("workbench accepted a non-loopback host")
+
     print(
         f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=5 "
         f"negative_semantic_vectors=13 tracked_assets={len(projection.assets)} "
@@ -219,7 +246,8 @@ def main() -> None:
         f"fitters={len(projection.fitters)} fitter_runs={len(projection.fitter_runs)} "
         f"fit_results={len(projection.fit_results)} hypotheses={len(projection.hypotheses)} "
         f"belief_revisions={len(projection.belief_revisions)} "
-        f"scenarios={len(projection.scenarios)} scenario_runs={len(projection.scenario_runs)}"
+        f"scenarios={len(projection.scenarios)} scenario_runs={len(projection.scenario_runs)} "
+        "workbench_contracts=1 negative_workbench_vectors=2"
     )
 
 

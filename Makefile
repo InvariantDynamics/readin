@@ -1,4 +1,4 @@
-.PHONY: check format lint test validate demo
+.PHONY: check format lint test validate demo workbench
 
 check: lint test validate
 
@@ -18,3 +18,6 @@ validate:
 
 demo:
 	uv run python scripts/demo_local_loop.py
+
+workbench:
+	uv run python scripts/serve_demo_workbench.py
