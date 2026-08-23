@@ -1,4 +1,4 @@
-"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 4 ledger."""
+"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 5 ledger."""
 
 from __future__ import annotations
 
@@ -6,6 +6,13 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
+from readin.belief import (
+    BELIEF_ALGORITHM_ID,
+    BeliefRuntimeError,
+    belief_implementation_sha256,
+    build_belief_snapshot,
+    compute_belief_components,
+)
 from readin.contracts import validate_event
 from readin.fitters import (
     FitterRuntimeError,
@@ -14,6 +21,13 @@ from readin.fitters import (
     reference_fit_components,
     reference_fitter_spec,
     validate_reference_descriptor,
+)
+from readin.scenarios import (
+    SCENARIO_ALGORITHM_ID,
+    ScenarioRuntimeError,
+    build_scenario_snapshot,
+    compute_scenario_components,
+    scenario_implementation_sha256,
 )
 
 
@@ -42,6 +56,13 @@ class ReadinProjection:
         self.fitter_runs: dict[str, dict[str, Any]] = {}
         self.fit_results: dict[str, dict[str, Any]] = {}
         self.fitter_receipts: dict[str, dict[str, Any]] = {}
+        self.hypotheses: dict[str, dict[str, Any]] = {}
+        self.belief_edges: dict[str, dict[str, Any]] = {}
+        self.belief_revisions: dict[str, dict[str, Any]] = {}
+        self.belief_receipts: dict[str, dict[str, Any]] = {}
+        self.scenarios: dict[str, dict[str, Any]] = {}
+        self.scenario_runs: dict[str, dict[str, Any]] = {}
+        self.scenario_receipts: dict[str, dict[str, Any]] = {}
         self.asset_versions: dict[str, list[dict[str, Any]]] = {}
         self.event_ids: set[str] = set()
         self._evidence_digests: dict[str, str] = {}
@@ -54,6 +75,10 @@ class ReadinProjection:
         self._fitter_recorded_at: dict[str, str] = {}
         self._fitter_run_groups: dict[str, dict[str, Any]] = {}
         self._fitter_run_pairs: set[tuple[str, str]] = set()
+        self._belief_graph: dict[str, set[str]] = {}
+        self._belief_edge_pairs: set[tuple[str, str]] = set()
+        self._latest_belief_revision: dict[str, str] = {}
+        self._latest_scenario_run: dict[str, str] = {}
         self._events: list[dict[str, Any]] = []
 
     @classmethod
@@ -583,6 +608,189 @@ class ReadinProjection:
         self._fitter_run_pairs.add((group_id, fitter_id))
         self._advance_asset(asset_id, event)
 
+    def _apply_hypothesis_created(self, event: dict[str, Any]) -> None:
+        hypothesis = deepcopy(event["payload"]["hypothesis"])
+        hypothesis_id = hypothesis["id"]
+        if hypothesis_id in self.hypotheses:
+            raise ProjectionError(f"duplicate hypothesis id: {hypothesis_id}")
+        asset_id = hypothesis["asset_entity_id"]
+        if asset_id not in self.assets:
+            raise ProjectionError(f"hypothesis references unknown tracked asset: {asset_id}")
+        unknown_targets = sorted(set(hypothesis["target_entity_ids"]) - self.entities.keys())
+        if unknown_targets:
+            raise ProjectionError(f"hypothesis references unknown targets: {unknown_targets}")
+        claim_ids = [item["claim_id"] for item in hypothesis["claim_bindings"]]
+        if len(claim_ids) != len(set(claim_ids)):
+            raise ProjectionError("hypothesis binds the same claim more than once")
+        unknown_claims = sorted(set(claim_ids) - self.claims.keys())
+        if unknown_claims:
+            raise ProjectionError(f"hypothesis references unknown claims: {unknown_claims}")
+        wrong_asset_claims = sorted(
+            claim_id for claim_id in claim_ids if self.claims[claim_id]["subject"] != asset_id
+        )
+        if wrong_asset_claims:
+            raise ProjectionError(
+                f"hypothesis claims belong to another asset: {wrong_asset_claims}"
+            )
+
+        self.hypotheses[hypothesis_id] = hypothesis
+        self.assets[asset_id]["active_hypotheses"].append(hypothesis_id)
+        self.assets[asset_id]["active_hypotheses"].sort()
+        self._advance_asset(asset_id, event)
+
+    def _apply_belief_edge_created(self, event: dict[str, Any]) -> None:
+        edge = deepcopy(event["payload"]["belief_edge"])
+        edge_id = edge["id"]
+        if edge_id in self.belief_edges:
+            raise ProjectionError(f"duplicate belief edge id: {edge_id}")
+        source = edge["source_hypothesis_id"]
+        target = edge["target_hypothesis_id"]
+        missing = sorted({source, target} - self.hypotheses.keys())
+        if missing:
+            raise ProjectionError(f"belief edge references unknown hypotheses: {missing}")
+        if source == target:
+            raise ProjectionError("belief edge cannot be self-referential")
+        source_asset = self.hypotheses[source]["asset_entity_id"]
+        target_asset = self.hypotheses[target]["asset_entity_id"]
+        if source_asset != target_asset:
+            raise ProjectionError("belief edge cannot cross tracked assets")
+        pair = (source, target)
+        if pair in self._belief_edge_pairs:
+            raise ProjectionError("belief edge already exists for this directed hypothesis pair")
+        if self._belief_path_exists(target, source):
+            raise ProjectionError("belief edge would create a cycle")
+
+        self.belief_edges[edge_id] = edge
+        self._belief_edge_pairs.add(pair)
+        self._belief_graph.setdefault(source, set()).add(target)
+        self._advance_asset(source_asset, event)
+
+    def _apply_belief_revision_completed(self, event: dict[str, Any]) -> None:
+        revision = deepcopy(event["payload"]["belief_revision"])
+        revision_id = revision["id"]
+        receipt = revision["execution_receipt"]
+        receipt_id = receipt["id"]
+        if revision_id in self.belief_revisions:
+            raise ProjectionError(f"duplicate belief revision id: {revision_id}")
+        if receipt_id in self.belief_receipts:
+            raise ProjectionError(f"duplicate belief receipt id: {receipt_id}")
+        asset_id = revision["asset_entity_id"]
+        if asset_id not in self.assets:
+            raise ProjectionError(f"belief revision references unknown asset: {asset_id}")
+        if receipt["asset_entity_id"] != asset_id:
+            raise ProjectionError("belief receipt asset binding mismatch")
+        if receipt["asset_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("belief receipt asset state version mismatch")
+        if not (revision["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("belief execution times must match ledger-recorded time")
+        if receipt["hypothesis_ids"] != sorted(receipt["hypothesis_ids"]):
+            raise ProjectionError("belief receipt hypothesis ids must use sorted order")
+
+        try:
+            snapshot = build_belief_snapshot(self, asset_id, receipt["hypothesis_ids"])
+            components = compute_belief_components(snapshot)
+        except BeliefRuntimeError as error:
+            raise ProjectionError(str(error)) from error
+        if receipt["input_snapshot_sha256"] != canonical_sha256(snapshot):
+            raise ProjectionError("belief receipt input snapshot digest mismatch")
+        for key, expected in snapshot["input_ids"].items():
+            if receipt[key] != expected:
+                raise ProjectionError(f"belief receipt {key} does not match graph input")
+        if receipt["algorithm_id"] != BELIEF_ALGORITHM_ID:
+            raise ProjectionError("belief receipt algorithm mismatch")
+        if receipt["implementation_sha256"] != belief_implementation_sha256():
+            raise ProjectionError("belief receipt implementation digest mismatch")
+        for key, expected in components.items():
+            if revision[key] != expected:
+                raise ProjectionError(f"belief revision {key} does not match reference propagation")
+        if receipt["outcome_sha256"] != canonical_sha256(components):
+            raise ProjectionError("belief receipt outcome digest mismatch")
+
+        self.belief_revisions[revision_id] = revision
+        self.belief_receipts[receipt_id] = receipt
+        self._latest_belief_revision[asset_id] = revision_id
+        self._advance_asset(asset_id, event)
+
+    def _apply_scenario_created(self, event: dict[str, Any]) -> None:
+        scenario = deepcopy(event["payload"]["scenario"])
+        scenario_id = scenario["id"]
+        if scenario_id in self.scenarios:
+            raise ProjectionError(f"duplicate scenario id: {scenario_id}")
+        asset_id = scenario["asset_entity_id"]
+        if asset_id not in self.assets:
+            raise ProjectionError(f"scenario references unknown tracked asset: {asset_id}")
+        if scenario["initial_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("scenario initial state version mismatch")
+        revision_id = scenario["belief_revision_id"]
+        if revision_id not in self.belief_revisions:
+            raise ProjectionError(f"scenario references unknown belief revision: {revision_id}")
+        if self.belief_revisions[revision_id]["asset_entity_id"] != asset_id:
+            raise ProjectionError("scenario belief revision belongs to another asset")
+        unknown_targets = sorted(set(scenario["target_entity_ids"]) - self.entities.keys())
+        if unknown_targets:
+            raise ProjectionError(f"scenario references unknown target entities: {unknown_targets}")
+        self._validate_scenario_plan(scenario)
+
+        self.scenarios[scenario_id] = scenario
+        self.assets[asset_id]["active_scenarios"].append(scenario_id)
+        self.assets[asset_id]["active_scenarios"].sort()
+        self._advance_asset(asset_id, event)
+
+    def _apply_scenario_run_completed(self, event: dict[str, Any]) -> None:
+        run = deepcopy(event["payload"]["scenario_run"])
+        run_id = run["id"]
+        receipt = run["execution_receipt"]
+        receipt_id = receipt["id"]
+        if run_id in self.scenario_runs:
+            raise ProjectionError(f"duplicate scenario run id: {run_id}")
+        if receipt_id in self.scenario_receipts:
+            raise ProjectionError(f"duplicate scenario receipt id: {receipt_id}")
+        scenario_id = run["scenario_id"]
+        if scenario_id not in self.scenarios:
+            raise ProjectionError(f"scenario run references unknown scenario: {scenario_id}")
+        if scenario_id in self._latest_scenario_run:
+            raise ProjectionError("bounded scenario already has a completed run")
+        scenario = self.scenarios[scenario_id]
+        asset_id = scenario["asset_entity_id"]
+        if run["asset_entity_id"] != asset_id or receipt["asset_entity_id"] != asset_id:
+            raise ProjectionError("scenario run asset binding mismatch")
+        if receipt["scenario_id"] != scenario_id:
+            raise ProjectionError("scenario receipt plan binding mismatch")
+        if receipt["asset_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("scenario receipt asset state version mismatch")
+        if not (run["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("scenario execution times must match ledger-recorded time")
+
+        try:
+            snapshot = build_scenario_snapshot(self, scenario_id)
+            components = compute_scenario_components(snapshot)
+        except ScenarioRuntimeError as error:
+            raise ProjectionError(str(error)) from error
+        expected_receipt_fields = {
+            "scenario_snapshot_sha256": canonical_sha256(scenario),
+            "belief_revision_id": scenario["belief_revision_id"],
+            "belief_revision_sha256": canonical_sha256(snapshot["belief_revision"]),
+            "branch_ids": sorted(item["id"] for item in scenario["branches"]),
+            "assumption_ids": sorted(item["id"] for item in scenario["assumptions"]),
+            "intervention_ids": sorted(item["id"] for item in scenario["interventions"]),
+            "algorithm_id": SCENARIO_ALGORITHM_ID,
+            "implementation_sha256": scenario_implementation_sha256(),
+            "outcome_sha256": canonical_sha256(components),
+        }
+        mismatched = [
+            key for key, expected in expected_receipt_fields.items() if receipt[key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"scenario receipt binding mismatch: {mismatched}")
+        for key, expected in components.items():
+            if run[key] != expected:
+                raise ProjectionError(f"scenario run {key} does not match reference evaluation")
+
+        self.scenario_runs[run_id] = run
+        self.scenario_receipts[receipt_id] = receipt
+        self._latest_scenario_run[scenario_id] = run_id
+        self._advance_asset(asset_id, event)
+
     def _validate_fitter_receipt_identity(
         self,
         run: dict[str, Any],
@@ -784,6 +992,98 @@ class ReadinProjection:
         ):
             raise ProjectionError("ASSESSED strength requires an ordinal and completed appraisal")
 
+    def _belief_path_exists(self, start: str, target: str) -> bool:
+        pending = [start]
+        visited: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == target:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            pending.extend(self._belief_graph.get(current, set()) - visited)
+        return False
+
+    def _validate_scenario_plan(self, scenario: dict[str, Any]) -> None:
+        assumption_ids = [item["id"] for item in scenario["assumptions"]]
+        intervention_ids = [item["id"] for item in scenario["interventions"]]
+        branch_ids = [item["id"] for item in scenario["branches"]]
+        for label, values in (
+            ("assumption", assumption_ids),
+            ("intervention", intervention_ids),
+            ("branch", branch_ids),
+        ):
+            if len(values) != len(set(values)):
+                raise ProjectionError(f"scenario contains duplicate {label} ids")
+
+        target_ids = set(scenario["target_entity_ids"])
+        invalid_interventions = sorted(
+            item["id"]
+            for item in scenario["interventions"]
+            if item["target_entity_id"] not in target_ids
+        )
+        if invalid_interventions:
+            raise ProjectionError(
+                f"scenario interventions target entities outside the plan: {invalid_interventions}"
+            )
+
+        revision_hypothesis_ids = {
+            item["hypothesis_id"]
+            for item in self.belief_revisions[scenario["belief_revision_id"]]["node_results"]
+        }
+        assumptions = set(assumption_ids)
+        interventions = set(intervention_ids)
+        branches = {item["id"]: item for item in scenario["branches"]}
+        unknown = [item for item in scenario["branches"] if item["kind"] == "UNKNOWN_UNMODELED"]
+        if len(unknown) != 1:
+            raise ProjectionError("scenario requires exactly one unknown/unmodeled branch")
+        unknown_id = unknown[0]["id"]
+        if unknown[0]["parent_branch_id"] is not None:
+            raise ProjectionError("unknown/unmodeled branch must remain a root")
+
+        for branch in scenario["branches"]:
+            parent = branch["parent_branch_id"]
+            if parent == branch["id"]:
+                raise ProjectionError("scenario branch cannot parent itself")
+            if parent is not None and parent not in branches:
+                raise ProjectionError(f"scenario branch references unknown parent: {parent}")
+            if parent == unknown_id:
+                raise ProjectionError("unknown/unmodeled branch cannot parent declared outcomes")
+            if not set(branch["assumption_ids"]) <= assumptions:
+                raise ProjectionError("scenario branch references unknown assumptions")
+            if not set(branch["intervention_ids"]) <= interventions:
+                raise ProjectionError("scenario branch references unknown interventions")
+            if branch["kind"] == "UNKNOWN_UNMODELED":
+                if branch["condition"] is not None:
+                    raise ProjectionError("unknown/unmodeled branch cannot declare a condition")
+                if branch["transition_support_state"] != "UNMODELED":
+                    raise ProjectionError("unknown/unmodeled branch must remain unmodeled")
+            else:
+                if branch["condition"] is None:
+                    raise ProjectionError("conditional scenario branch requires a condition")
+                if branch["condition"]["hypothesis_id"] not in revision_hypothesis_ids:
+                    raise ProjectionError(
+                        "scenario branch condition is absent from the bound belief revision"
+                    )
+                if branch["transition_support_state"] != "USER_DEFINED_NOT_VALIDATED":
+                    raise ProjectionError("conditional scenario transition cannot be promoted")
+
+        depth_cache: dict[str, int] = {}
+
+        def depth(branch_id: str, path: set[str]) -> int:
+            if branch_id in depth_cache:
+                return depth_cache[branch_id]
+            if branch_id in path:
+                raise ProjectionError("scenario branches contain a cycle")
+            parent = branches[branch_id]["parent_branch_id"]
+            result = 1 if parent is None else 1 + depth(parent, path | {branch_id})
+            depth_cache[branch_id] = result
+            return result
+
+        if max(depth(branch_id, set()) for branch_id in branches) > 4:
+            raise ProjectionError("scenario branch depth exceeds the bounded maximum of four")
+
     def _dependency_path_exists(self, start: str, target: str) -> bool:
         pending = [start]
         visited: set[str] = set()
@@ -871,6 +1171,28 @@ class ReadinProjection:
             if group["asset_entity_id"] == entity_id
         ]
         multi_fitter_runs.sort(key=lambda item: (item["recorded_at"], item["run_group_id"]))
+        hypotheses = [
+            self.hypothesis_view(hypothesis_id)
+            for hypothesis_id, hypothesis in self.hypotheses.items()
+            if hypothesis["asset_entity_id"] == entity_id
+        ]
+        hypotheses.sort(
+            key=lambda item: (item["hypothesis"]["created_at"], item["hypothesis"]["id"])
+        )
+        belief_revisions = [
+            self.belief_revision_view(revision_id)
+            for revision_id, revision in self.belief_revisions.items()
+            if revision["asset_entity_id"] == entity_id
+        ]
+        belief_revisions.sort(
+            key=lambda item: (item["revision"]["recorded_at"], item["revision"]["id"])
+        )
+        scenarios = [
+            self.scenario_view(scenario_id)
+            for scenario_id, scenario in self.scenarios.items()
+            if scenario["asset_entity_id"] == entity_id
+        ]
+        scenarios.sort(key=lambda item: (item["scenario"]["created_at"], item["scenario"]["id"]))
         claim_ids = {item["claim"]["id"] for item in claims}
         links = [
             deepcopy(link) for link in self.evidence_links.values() if link["claim_id"] in claim_ids
@@ -898,6 +1220,9 @@ class ReadinProjection:
             "resolution_candidates": resolution_candidates,
             "cartographic_query_plans": cartographic_query_plans,
             "multi_fitter_runs": multi_fitter_runs,
+            "hypotheses": hypotheses,
+            "belief_revisions": belief_revisions,
+            "scenarios": scenarios,
             "evidence_dependencies": dependencies,
             "observer_frames": [deepcopy(self.frames[item]) for item in frame_ids],
             "evidence_manifests": [deepcopy(self.evidence[item]) for item in artifact_ids],
@@ -1260,6 +1585,85 @@ class ReadinProjection:
             "authority_state": "NO_AUTHORITY",
         }
 
+    def hypothesis_view(self, hypothesis_id: str) -> dict[str, Any]:
+        if hypothesis_id not in self.hypotheses:
+            raise ProjectionError(f"unknown hypothesis: {hypothesis_id}")
+        hypothesis = deepcopy(self.hypotheses[hypothesis_id])
+        incoming = [
+            deepcopy(edge)
+            for edge in self.belief_edges.values()
+            if edge["target_hypothesis_id"] == hypothesis_id
+        ]
+        outgoing = [
+            deepcopy(edge)
+            for edge in self.belief_edges.values()
+            if edge["source_hypothesis_id"] == hypothesis_id
+        ]
+        incoming.sort(key=lambda item: item["id"])
+        outgoing.sort(key=lambda item: item["id"])
+        latest_revision_id = self._latest_belief_revision.get(hypothesis["asset_entity_id"])
+        latest_result = None
+        if latest_revision_id is not None:
+            latest_result = next(
+                (
+                    deepcopy(item)
+                    for item in self.belief_revisions[latest_revision_id]["node_results"]
+                    if item["hypothesis_id"] == hypothesis_id
+                ),
+                None,
+            )
+        return {
+            "hypothesis": hypothesis,
+            "incoming_edges": incoming,
+            "outgoing_edges": outgoing,
+            "latest_belief_revision_id": latest_revision_id,
+            "latest_result": latest_result,
+            "probability_state": "NOT_COMPUTED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def belief_revision_view(self, revision_id: str) -> dict[str, Any]:
+        if revision_id not in self.belief_revisions:
+            raise ProjectionError(f"unknown belief revision: {revision_id}")
+        return {
+            "revision": deepcopy(self.belief_revisions[revision_id]),
+            "dependency_policy": "GROUP_BY_DECLARED_ANCESTRY",
+            "interpretation": "DIAGNOSTIC_SIGNAL_BALANCE_NOT_TRUTH_PROBABILITY",
+            "probability_state": "NOT_COMPUTED",
+            "prediction_state": "NOT_REQUESTED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def scenario_view(self, scenario_id: str) -> dict[str, Any]:
+        if scenario_id not in self.scenarios:
+            raise ProjectionError(f"unknown scenario: {scenario_id}")
+        run_id = self._latest_scenario_run.get(scenario_id)
+        return {
+            "scenario": deepcopy(self.scenarios[scenario_id]),
+            "run": self.scenario_run_view(run_id)["run"] if run_id is not None else None,
+            "unknown_branch_visible": any(
+                item["kind"] == "UNKNOWN_UNMODELED"
+                for item in self.scenarios[scenario_id]["branches"]
+            ),
+            "likelihood_state": "NOT_COMPUTED",
+            "trajectory_state": "NOT_SIMULATED",
+            "prediction_state": "NOT_REQUESTED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def scenario_run_view(self, run_id: str) -> dict[str, Any]:
+        if run_id not in self.scenario_runs:
+            raise ProjectionError(f"unknown scenario run: {run_id}")
+        run = deepcopy(self.scenario_runs[run_id])
+        return {
+            "run": run,
+            "scenario": deepcopy(self.scenarios[run["scenario_id"]]),
+            "likelihood_state": "NOT_COMPUTED",
+            "trajectory_state": "NOT_SIMULATED",
+            "prediction_state": "NOT_REQUESTED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
     def resolution_candidate_view(self, candidate_id: str) -> dict[str, Any]:
         if candidate_id not in self.resolution_candidates:
             raise ProjectionError(f"unknown resolution candidate: {candidate_id}")
@@ -1433,6 +1837,21 @@ class ReadinProjection:
             if query_id not in self.cartographic_query_plans:
                 return set()
             return {self.cartographic_query_plans[query_id]["asset_entity_id"]}
+        if event_type == "hypothesis.created":
+            hypothesis = payload["hypothesis"]
+            return {hypothesis["asset_entity_id"], *hypothesis["target_entity_ids"]}
+        if event_type == "belief.edge_created":
+            source_id = payload["belief_edge"]["source_hypothesis_id"]
+            if source_id not in self.hypotheses:
+                return set()
+            return {self.hypotheses[source_id]["asset_entity_id"]}
+        if event_type == "belief.revision_completed":
+            return {payload["belief_revision"]["asset_entity_id"]}
+        if event_type == "scenario.created":
+            scenario = payload["scenario"]
+            return {scenario["asset_entity_id"], *scenario["target_entity_ids"]}
+        if event_type == "scenario.run_completed":
+            return {payload["scenario_run"]["asset_entity_id"]}
         if event_type == "evidence.linked":
             claim_id = payload["evidence_link"]["claim_id"]
             return {self.claims[claim_id]["subject"]} if claim_id in self.claims else set()
@@ -1469,6 +1888,16 @@ class ReadinProjection:
             return event["payload"]["fitter_descriptor"]["registered_at"]
         if event_type == "fitter.run_completed":
             return event["payload"]["fitter_run"]["recorded_at"]
+        if event_type == "hypothesis.created":
+            return event["payload"]["hypothesis"]["created_at"]
+        if event_type == "belief.edge_created":
+            return event["payload"]["belief_edge"]["created_at"]
+        if event_type == "belief.revision_completed":
+            return event["payload"]["belief_revision"]["recorded_at"]
+        if event_type == "scenario.created":
+            return event["payload"]["scenario"]["created_at"]
+        if event_type == "scenario.run_completed":
+            return event["payload"]["scenario_run"]["recorded_at"]
         return event["occurred_at"]
 
     def _parse_timestamp(self, value: str) -> datetime:
@@ -1504,6 +1933,20 @@ class ReadinProjection:
                     entity_id
                     == self.cartographic_query_plans[result["query_plan_id"]]["asset_entity_id"]
                     for result in self.fit_results.values()
+                ),
+                "hypothesis_count": sum(
+                    entity_id == hypothesis["asset_entity_id"]
+                    for hypothesis in self.hypotheses.values()
+                ),
+                "belief_revision_count": sum(
+                    entity_id == revision["asset_entity_id"]
+                    for revision in self.belief_revisions.values()
+                ),
+                "scenario_count": sum(
+                    entity_id == scenario["asset_entity_id"] for scenario in self.scenarios.values()
+                ),
+                "scenario_run_count": sum(
+                    entity_id == run["asset_entity_id"] for run in self.scenario_runs.values()
                 ),
                 "authority_state": "NO_AUTHORITY",
             }

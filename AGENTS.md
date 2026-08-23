@@ -28,7 +28,7 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 4 slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 5 slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -47,6 +47,11 @@ The Phase 0 through bounded Phase 4 slices are local-first and manual-input only
 - explicit fitter admissibility, invalidity, and abstention;
 - digest-bound execution receipts and partial multi-fitter run preservation;
 - method-specific disagreement views with no compulsory consensus;
+- unresolved hypotheses with explicit claim polarity bindings;
+- acyclic, assumption-bound belief edges;
+- dependency-aware categorical belief revisions with no probability claim;
+- assumption- and intervention-bound scenario trees with a required unknown branch;
+- structural branch-antecedent evaluation without likelihoods or simulated trajectories;
 - append-only JSONL event persistence;
 - deterministic asset-state replay;
 - schema validation and fail-closed referential checks.
@@ -58,7 +63,10 @@ relations, candidate dispositions, surfaces, and query plans are manually record
 objects, not machine truth determinations. A cartographic result never establishes source coverage
 or completeness, and execution cannot access the network. Reference fitter outputs are local
 diagnostics with `NOT_ESTABLISHED` empirical validity, `NOT_CALIBRATED` uncertainty, no residual
-readback, and no model or action authority.
+readback, and no model or action authority. Belief states are categorical diagnostic signal balances,
+not probabilities or truth determinations. Scenario interventions have `NOT_ESTABLISHED` causal
+status, the unmodeled region cannot be removed, and scenario execution performs no fitter forecast,
+likelihood assignment, trajectory simulation, prediction, or action.
 
 ## Contract changes
 

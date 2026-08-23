@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 through Phase 4 runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 5 runtime."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from readin.belief import BeliefRuntimeError, execute_belief_revision
 from readin.contracts import ContractViolation
 from readin.events import (
+    create_belief_edge_created,
     create_cartographic_query_planned,
     create_cartographic_surface_registered,
     create_claim_created,
@@ -18,6 +20,7 @@ from readin.events import (
     create_evidence_dependency_declared,
     create_evidence_linked,
     create_evidence_manifested,
+    create_hypothesis_created,
     create_observation_admitted,
     create_observer_frame_registered,
     create_relation_created,
@@ -31,6 +34,11 @@ from readin.fitters import (
     execute_reference_fitter_group,
 )
 from readin.projection import ProjectionError
+from readin.scenarios import (
+    ScenarioRuntimeError,
+    create_bounded_scenario,
+    execute_scenario,
+)
 from readin.store import EventLedger, LedgerError
 
 ACCESS_POLICIES = ("PUBLIC", "LICENSED", "USER_OWNED", "OTHERWISE_AUTHORIZED")
@@ -341,6 +349,74 @@ def _build_parser() -> argparse.ArgumentParser:
     run_fitters_parser.add_argument("--fitter", required=True, action="append")
     run_fitters_parser.add_argument("--run-group-id")
 
+    hypothesis_parser = subparsers.add_parser(
+        "create-hypothesis",
+        help="Create an unresolved hypothesis with explicit claim polarity bindings",
+    )
+    _add_ledger_argument(hypothesis_parser)
+    hypothesis_parser.add_argument("--asset", required=True)
+    hypothesis_parser.add_argument("--name", required=True)
+    hypothesis_parser.add_argument("--statement", required=True)
+    hypothesis_parser.add_argument("--target", action="append", default=[])
+    hypothesis_parser.add_argument(
+        "--claim-binding-json",
+        action="append",
+        default=[],
+        help="Claim binding JSON with claim_id and polarity",
+    )
+    hypothesis_parser.add_argument("--hypothesis-id")
+
+    belief_edge_parser = subparsers.add_parser(
+        "create-belief-edge",
+        help="Create one assumption-bound directed edge in the acyclic belief graph",
+    )
+    _add_ledger_argument(belief_edge_parser)
+    belief_edge_parser.add_argument("--source-hypothesis", required=True)
+    belief_edge_parser.add_argument("--target-hypothesis", required=True)
+    belief_edge_parser.add_argument(
+        "--polarity",
+        required=True,
+        choices=(
+            "SUPPORTS_IF_SOURCE_SUPPORT_LEADING",
+            "CHALLENGES_IF_SOURCE_SUPPORT_LEADING",
+        ),
+    )
+    belief_edge_parser.add_argument("--assumption", required=True)
+    belief_edge_parser.add_argument("--edge-id")
+
+    revise_beliefs_parser = subparsers.add_parser(
+        "revise-beliefs",
+        help="Run dependency-aware categorical propagation without computing probabilities",
+    )
+    _add_ledger_argument(revise_beliefs_parser)
+    revise_beliefs_parser.add_argument("--asset", required=True)
+    revise_beliefs_parser.add_argument("--hypothesis", action="append", default=[])
+    revise_beliefs_parser.add_argument("--revision-id")
+
+    scenario_parser = subparsers.add_parser(
+        "create-scenario",
+        help="Create an assumption-bound conditional scenario with a visible unknown branch",
+    )
+    _add_ledger_argument(scenario_parser)
+    scenario_parser.add_argument("--asset", required=True)
+    scenario_parser.add_argument("--name", required=True)
+    scenario_parser.add_argument("--belief-revision", required=True)
+    scenario_parser.add_argument("--target", action="append", default=[])
+    scenario_parser.add_argument("--start-time", required=True)
+    scenario_parser.add_argument("--horizon-days", required=True, type=int)
+    scenario_parser.add_argument("--assumption-json", required=True, action="append")
+    scenario_parser.add_argument("--intervention-json", required=True, action="append")
+    scenario_parser.add_argument("--branch-json", required=True, action="append")
+    scenario_parser.add_argument("--scenario-id")
+
+    run_scenario_parser = subparsers.add_parser(
+        "run-scenario",
+        help="Evaluate scenario antecedents without simulating trajectories or likelihoods",
+    )
+    _add_ledger_argument(run_scenario_parser)
+    run_scenario_parser.add_argument("--scenario", required=True)
+    run_scenario_parser.add_argument("--run-id")
+
     show_parser = subparsers.add_parser("show-asset", help="Replay and inspect one tracked asset")
     _add_ledger_argument(show_parser)
     show_parser.add_argument("--asset", required=True)
@@ -399,6 +475,30 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_ledger_argument(multi_fitter_view_parser)
     multi_fitter_view_parser.add_argument("--run-group", required=True)
+
+    hypothesis_view_parser = subparsers.add_parser(
+        "show-hypothesis", help="Inspect one hypothesis, its edges, and latest categorical result"
+    )
+    _add_ledger_argument(hypothesis_view_parser)
+    hypothesis_view_parser.add_argument("--hypothesis", required=True)
+
+    belief_revision_view_parser = subparsers.add_parser(
+        "show-belief-revision", help="Inspect one dependency-bound belief execution receipt"
+    )
+    _add_ledger_argument(belief_revision_view_parser)
+    belief_revision_view_parser.add_argument("--revision", required=True)
+
+    scenario_view_parser = subparsers.add_parser(
+        "show-scenario", help="Inspect one conditional scenario plan and retained unknown branch"
+    )
+    _add_ledger_argument(scenario_view_parser)
+    scenario_view_parser.add_argument("--scenario", required=True)
+
+    scenario_run_view_parser = subparsers.add_parser(
+        "show-scenario-run", help="Inspect a structural scenario evaluation and receipt"
+    )
+    _add_ledger_argument(scenario_run_view_parser)
+    scenario_run_view_parser.add_argument("--run", required=True)
 
     list_parser = subparsers.add_parser("list-assets", help="Replay and list the tracked catalog")
     _add_ledger_argument(list_parser)
@@ -629,6 +729,70 @@ def _run(args: argparse.Namespace) -> Any:
         run_group_id = events[0]["payload"]["fitter_run"]["run_group_id"]
         return ledger.projection().multi_fitter_run_view(run_group_id)
 
+    if args.command == "create-hypothesis":
+        event = create_hypothesis_created(
+            args.asset,
+            args.name,
+            args.statement,
+            [_json_object(item) for item in args.claim_binding_json],
+            target_entity_ids=args.target,
+            hypothesis_id=args.hypothesis_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "create-belief-edge":
+        event = create_belief_edge_created(
+            args.source_hypothesis,
+            args.target_hypothesis,
+            args.polarity,
+            args.assumption,
+            edge_id=args.edge_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "revise-beliefs":
+        projection = ledger.projection()
+        event = execute_belief_revision(
+            projection,
+            args.asset,
+            args.hypothesis or None,
+            revision_id=args.revision_id,
+        )
+        ledger.append(event)
+        revision_id = event["payload"]["belief_revision"]["id"]
+        return ledger.projection().belief_revision_view(revision_id)
+
+    if args.command == "create-scenario":
+        projection = ledger.projection()
+        event = create_bounded_scenario(
+            projection,
+            args.asset,
+            args.name,
+            args.belief_revision,
+            args.target or [args.asset],
+            [_json_object(item) for item in args.assumption_json],
+            [_json_object(item) for item in args.intervention_json],
+            [_json_object(item) for item in args.branch_json],
+            start_time=args.start_time,
+            horizon_days=args.horizon_days,
+            scenario_id=args.scenario_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "run-scenario":
+        projection = ledger.projection()
+        event = execute_scenario(
+            projection,
+            args.scenario,
+            run_id=args.run_id,
+        )
+        ledger.append(event)
+        run_id = event["payload"]["scenario_run"]["id"]
+        return ledger.projection().scenario_run_view(run_id)
+
     projection = ledger.projection()
     if args.command == "show-asset":
         return projection.asset_view_at(
@@ -656,6 +820,14 @@ def _run(args: argparse.Namespace) -> Any:
         return projection.fitter_run_view(args.run)
     if args.command == "show-multi-fitter-run":
         return projection.multi_fitter_run_view(args.run_group)
+    if args.command == "show-hypothesis":
+        return projection.hypothesis_view(args.hypothesis)
+    if args.command == "show-belief-revision":
+        return projection.belief_revision_view(args.revision)
+    if args.command == "show-scenario":
+        return projection.scenario_view(args.scenario)
+    if args.command == "show-scenario-run":
+        return projection.scenario_run_view(args.run)
     if args.command == "list-assets":
         return projection.catalog_view()
     raise AssertionError(f"unhandled command: {args.command}")
@@ -669,9 +841,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     except (
         ContractViolation,
+        BeliefRuntimeError,
         FitterRuntimeError,
+        KeyError,
         LedgerError,
         ProjectionError,
+        ScenarioRuntimeError,
         ValueError,
     ) as error:
         print(f"readin: {error}", file=sys.stderr)

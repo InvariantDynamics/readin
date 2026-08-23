@@ -12,6 +12,7 @@ from readin.synthetic import (
     phase2_events,
     phase3_events,
     phase4_events,
+    phase5_events,
 )
 
 
@@ -88,6 +89,36 @@ def test_synthetic_phase4_events_conform_without_consensus_or_model_authority() 
         item["execution_receipt"]["consensus_policy"] == "PRESERVE_DISAGREEMENT" for item in runs
     )
     assert all(item["execution_receipt"]["prediction_state"] == "NOT_REQUESTED" for item in runs)
+
+
+def test_synthetic_phase5_events_conform_without_probability_or_forecast_authority() -> None:
+    events = phase5_events()
+    assert len(events) == 37
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    revision = events[34]["payload"]["belief_revision"]
+    scenario = events[35]["payload"]["scenario"]
+    run = events[36]["payload"]["scenario_run"]
+    assert revision["probability_state"] == "NOT_COMPUTED"
+    assert revision["prediction_state"] == "NOT_REQUESTED"
+    assert scenario["likelihood_state"] == "NOT_COMPUTED"
+    assert any(item["kind"] == "UNKNOWN_UNMODELED" for item in scenario["branches"])
+    assert run["trajectory_state"] == "NOT_SIMULATED"
+    assert run["fitter_execution_state"] == "NOT_RUN_NO_FORECAST_CAPABLE_FITTER"
+
+
+def test_phase5_contract_rejects_probability_and_prediction_promotion() -> None:
+    revision_event = deepcopy(phase5_events()[34])
+    revision_event["payload"]["belief_revision"]["probability_state"] = "COMPUTED"
+    with pytest.raises(ContractViolation, match="NOT_COMPUTED"):
+        validate_event(revision_event)
+
+    scenario_event = deepcopy(phase5_events()[35])
+    scenario_event["payload"]["scenario"]["prediction_state"] = "FORECAST"
+    with pytest.raises(ContractViolation, match="NOT_REQUESTED"):
+        validate_event(scenario_event)
 
 
 def test_closed_event_rejects_unknown_field() -> None:

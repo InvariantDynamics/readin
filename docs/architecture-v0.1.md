@@ -18,10 +18,11 @@ E_e(t) = (observations, claims, relations, hypotheses, beliefs,
 
 The current implementation opens the entity, tracking, frame, evidence-manifest, observation,
 dependency, claim, evidence-link, relation, historical reconstruction, and reversible candidate
-resolution layers, plus bounded cartographic and multi-fitter layers. These layers remain separate:
-an observation is never silently promoted into a claim or belief, linked evidence never resolves a
-claim by itself, a selected surface never becomes a completeness claim, and a fitter result never
-becomes evidence or model authority.
+resolution layers, plus bounded cartographic, multi-fitter, belief, and scenario layers. These layers
+remain separate: an observation is never silently promoted into a claim or belief, linked evidence
+never resolves a claim by itself, a selected surface never becomes a completeness claim, a fitter
+result never becomes evidence or model authority, a categorical belief revision never becomes a
+truth probability, and a scenario branch never becomes a forecast.
 
 ## Ownership boundary
 
@@ -33,7 +34,7 @@ becomes evidence or model authority.
 
 ## Current event model
 
-The ledger supports fifteen events:
+The ledger supports twenty events:
 
 - `entity.created`
 - `asset.tracking_started`
@@ -50,6 +51,11 @@ The ledger supports fifteen events:
 - `cartography.query_planned`
 - `fitter.registered`
 - `fitter.run_completed`
+- `hypothesis.created`
+- `belief.edge_created`
+- `belief.revision_completed`
+- `scenario.created`
+- `scenario.run_completed`
 
 Every event is append-only, schema-validated, timestamped, uniquely identified, and marked
 `NO_AUTHORITY`. Projection fails closed when an asset or frame is unknown, an identifier is reused,
@@ -81,6 +87,13 @@ cartography.query_planned --> fitter.run_completed --> receipt + result/abstenti
                                   ^
                                   |
                          fitter.registered
+
+claim.created --> hypothesis.created --> belief.revision_completed
+                         |                         |
+                         +--> belief.edge_created-+
+                                                   |
+                                                   v
+                         scenario.created --> scenario.run_completed
 ```
 
 Candidate resolution is a sidecar to entity identity, not an entity mutation. A candidate records
@@ -145,6 +158,35 @@ is privileged, and no averaging or weighting is performed. Residuals remain `NOT
 uncertainty remains `NOT_CALIBRATED`, prediction is `NOT_REQUESTED`, and all outputs remain
 `NO_AUTHORITY`.
 
+## Bounded belief and scenario runtime
+
+Phase 5 introduces unresolved hypotheses, directed belief edges, categorical belief revisions, and
+conditional scenario trees. A hypothesis explicitly binds zero or more claims as supporting or
+challenging its proposition. A belief edge states only what signal should be introduced if its
+source hypothesis is support-leading; it carries an assumption and `NOT_ESTABLISHED` causal status.
+The projection rejects self-edges, cross-asset edges, duplicate directed pairs, and cycles.
+
+Belief execution first groups evidence links by declared dependency ancestry, preventing repeated
+derivatives from becoming independent support units. It then propagates categorical states in
+topological order: `SUPPORT_LEADING`, `CHALLENGE_LEADING`, `CONFLICTED`, or `UNRESOLVED`. These are
+diagnostic signal balances, not probabilities that hypotheses are true. Every revision binds its
+asset state version, complete selected graph, claim links, dependency declarations, executable
+implementation digest, and result digest. Probability is `NOT_COMPUTED`, uncertainty is
+`NOT_CALIBRATED`, empirical validity is `NOT_ESTABLISHED`, and prediction is `NOT_REQUESTED`.
+
+A scenario binds one immutable belief revision, explicit user-supplied assumptions and
+interventions, a finite horizon, target entities, and a tree of conditional branches. Interventions
+retain `NOT_ESTABLISHED` causal status. Exactly one root branch represents the unknown/unmodeled
+region and cannot parent declared outcomes. Declared branch depth is bounded to four.
+
+Scenario execution evaluates only whether each branch antecedent matches the bound categorical
+revision and whether its parent matched. It does not run the Phase 4 diagnostics as forecast models,
+assign likelihoods, simulate trajectories, identify causes, or predict outcomes. Results therefore
+retain `NOT_RUN_NO_FORECAST_CAPABLE_FITTER`, `NOT_COMPUTED` likelihood,
+`NOT_SIMULATED` trajectory, `NOT_REQUESTED` prediction, `NOT_ESTABLISHED` empirical validity, and
+`NO_AUTHORITY`. Digest-bound receipts make structural evaluation replayable without promoting it to
+a forecast.
+
 Claims are created with `epistemic_status: unresolved`. An evidence link records role or polarity,
 dependency group, warrant, appraisal, and strength as separate axes. Strength is `UNASSESSED` until
 an appraisal is completed. A `derives` link must name an artifact used by one of the claim's cited
@@ -194,7 +236,8 @@ artifact storage and live acquisition are later gated work.
    backward query plans, and deterministic local traversal. *(implemented)*
 5. **Phase 4 multi-fitter runtime** — bounded fitter inputs, digest-bound receipts, explicit
    admissibility/invalidity, partial groups, and preserved disagreement. *(implemented)*
-6. **Phase 5 scenario and belief engine** — conditional branches without destiny claims.
+6. **Phase 5 scenario and belief engine** — dependency-aware categorical revisions and conditional
+   branches without destiny claims. *(implemented)*
 7. **Phase 6 asset workbench** — dense operator interface over the inspectable epistemic field.
 
 Each slice requires its own contract, positive and negative fixtures, validation path, claim ceiling,

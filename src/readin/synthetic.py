@@ -6,7 +6,9 @@ import hashlib
 import json
 from typing import Any
 
+from readin.belief import execute_belief_revision
 from readin.events import (
+    create_belief_edge_created,
     create_cartographic_query_planned,
     create_cartographic_surface_registered,
     create_claim_created,
@@ -14,6 +16,7 @@ from readin.events import (
     create_evidence_dependency_declared,
     create_evidence_linked,
     create_evidence_manifested,
+    create_hypothesis_created,
     create_observation_admitted,
     create_observer_frame_registered,
     create_relation_created,
@@ -26,6 +29,7 @@ from readin.fitters import (
     execute_reference_fitter_group,
 )
 from readin.projection import ReadinProjection
+from readin.scenarios import create_bounded_scenario, execute_scenario
 
 
 def phase0_events() -> list[dict[str, Any]]:
@@ -477,4 +481,127 @@ def phase4_events() -> list[dict[str, Any]]:
         deterministic_ids=True,
     )
     events.extend(run_events)
+    return events
+
+
+def phase5_events() -> list[dict[str, Any]]:
+    """Return a bounded belief revision and non-predictive conditional scenario tree."""
+
+    events = phase4_events()
+    asset_id = "11111111-1111-4111-8111-111111111111"
+    claim_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    upstream_hypothesis_id = "81818181-8181-4181-8181-818181818181"
+    downstream_hypothesis_id = "82828282-8282-4282-8282-828282828282"
+    belief_revision_id = "84848484-8484-4484-8484-848484848481"
+    scenario_id = "85858585-8585-4585-8585-858585858585"
+    assumption_id = "86868686-8686-4686-8686-868686868681"
+    intervention_id = "86868686-8686-4686-8686-868686868682"
+
+    hypothesis_events = [
+        create_hypothesis_created(
+            asset_id,
+            "Program relationship remains observable",
+            "The synthetic program relationship remains observable during the scenario horizon",
+            [{"claim_id": claim_id, "polarity": "SUPPORTS_HYPOTHESIS"}],
+            hypothesis_id=upstream_hypothesis_id,
+            event_id="81818181-8181-4181-8181-818181818182",
+            occurred_at="2026-08-21T12:00:29Z",
+        ),
+        create_hypothesis_created(
+            asset_id,
+            "Program activity remains conditionally relevant",
+            "Program activity remains relevant if the reported relationship is support-leading",
+            [],
+            hypothesis_id=downstream_hypothesis_id,
+            event_id="82828282-8282-4282-8282-828282828283",
+            occurred_at="2026-08-21T12:00:30Z",
+        ),
+        create_belief_edge_created(
+            upstream_hypothesis_id,
+            downstream_hypothesis_id,
+            "SUPPORTS_IF_SOURCE_SUPPORT_LEADING",
+            "The fixture treats continued observability as a conditional relevance signal",
+            edge_id="83838383-8383-4383-8383-838383838383",
+            event_id="83838383-8383-4383-8383-838383838384",
+            occurred_at="2026-08-21T12:00:31Z",
+        ),
+    ]
+    projection = ReadinProjection.replay(events)
+    for event in hypothesis_events:
+        projection.apply(event)
+        events.append(event)
+
+    revision_event = execute_belief_revision(
+        projection,
+        asset_id,
+        [upstream_hypothesis_id, downstream_hypothesis_id],
+        revision_id=belief_revision_id,
+        receipt_id="84848484-8484-4484-8484-848484848482",
+        event_id="84848484-8484-4484-8484-848484848483",
+        occurred_at="2026-08-21T12:00:32Z",
+    )
+    projection.apply(revision_event)
+    events.append(revision_event)
+
+    scenario_event = create_bounded_scenario(
+        projection,
+        asset_id,
+        "Synthetic conditional program horizon",
+        belief_revision_id,
+        [asset_id],
+        [
+            {
+                "id": assumption_id,
+                "statement": "No unmodeled source changes are introduced into the fixture",
+            }
+        ],
+        [
+            {
+                "id": intervention_id,
+                "target_entity_id": asset_id,
+                "description": "Assume the reported program relationship remains observable",
+            }
+        ],
+        [
+            {
+                "id": "87878787-8787-4787-8787-878787878781",
+                "name": "Conditional continuation branch",
+                "outcome_statement": "Program activity remains conditionally relevant",
+                "condition": {
+                    "hypothesis_id": downstream_hypothesis_id,
+                    "expected_state": "SUPPORT_LEADING",
+                },
+                "assumption_ids": [assumption_id],
+                "intervention_ids": [intervention_id],
+            },
+            {
+                "id": "87878787-8787-4787-8787-878787878782",
+                "name": "Conditional challenge branch",
+                "outcome_statement": "Program activity is not treated as conditionally relevant",
+                "condition": {
+                    "hypothesis_id": downstream_hypothesis_id,
+                    "expected_state": "CHALLENGE_LEADING",
+                },
+                "assumption_ids": [assumption_id],
+                "intervention_ids": [intervention_id],
+            },
+        ],
+        start_time="2026-08-22T00:00:00Z",
+        horizon_days=30,
+        scenario_id=scenario_id,
+        event_id="88888888-8888-4888-8888-888888888881",
+        occurred_at="2026-08-21T12:00:33Z",
+    )
+    projection.apply(scenario_event)
+    events.append(scenario_event)
+
+    run_event = execute_scenario(
+        projection,
+        scenario_id,
+        run_id="89898989-8989-4989-8989-898989898981",
+        receipt_id="89898989-8989-4989-8989-898989898982",
+        event_id="89898989-8989-4989-8989-898989898983",
+        occurred_at="2026-08-21T12:00:34Z",
+    )
+    events.append(run_event)
     return events
