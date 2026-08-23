@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.readin.dev/v0.1/readin-event.schema.json",
   "title": "READIN Event v0.1",
-  "description": "Closed event envelope for the READIN Phase 0 through Phase 4 local ledger.",
+  "description": "Closed event envelope for the READIN Phase 0 through Phase 5 local ledger.",
   "type": "object",
   "required": [
     "schema_version",
@@ -31,7 +31,12 @@
         "cartography.surface_registered",
         "cartography.query_planned",
         "fitter.registered",
-        "fitter.run_completed"
+        "fitter.run_completed",
+        "hypothesis.created",
+        "belief.edge_created",
+        "belief.revision_completed",
+        "scenario.created",
+        "scenario.run_completed"
       ]
     },
     "occurred_at": { "$ref": "#/$defs/timestamp" },
@@ -189,6 +194,61 @@
       "then": {
         "properties": {
           "payload": { "$ref": "#/$defs/fitterRunCompletedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "hypothesis.created" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/hypothesisCreatedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "belief.edge_created" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/beliefEdgeCreatedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "belief.revision_completed" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/beliefRevisionCompletedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "scenario.created" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/scenarioCreatedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "scenario.run_completed" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/scenarioRunCompletedPayload" }
         }
       }
     }
@@ -1575,6 +1635,620 @@
       "required": ["fitter_run"],
       "properties": {
         "fitter_run": { "$ref": "#/$defs/fitterRun" }
+      },
+      "additionalProperties": false
+    },
+    "hypothesisClaimBinding": {
+      "type": "object",
+      "required": ["claim_id", "polarity"],
+      "properties": {
+        "claim_id": { "$ref": "#/$defs/uuid" },
+        "polarity": {
+          "enum": ["SUPPORTS_HYPOTHESIS", "CHALLENGES_HYPOTHESIS"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "hypothesis": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "name",
+        "proposition",
+        "target_entity_ids",
+        "claim_bindings",
+        "state",
+        "probability_state",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "proposition": {
+          "type": "object",
+          "required": ["statement", "modality"],
+          "properties": {
+            "statement": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "modality": { "const": "HYPOTHETICAL" }
+          },
+          "additionalProperties": false
+        },
+        "target_entity_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "claim_bindings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/hypothesisClaimBinding" },
+          "uniqueItems": true
+        },
+        "state": { "const": "UNRESOLVED" },
+        "probability_state": { "const": "NOT_COMPUTED" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "hypothesisCreatedPayload": {
+      "type": "object",
+      "required": ["hypothesis"],
+      "properties": {
+        "hypothesis": { "$ref": "#/$defs/hypothesis" }
+      },
+      "additionalProperties": false
+    },
+    "beliefEdge": {
+      "type": "object",
+      "required": [
+        "id",
+        "source_hypothesis_id",
+        "target_hypothesis_id",
+        "polarity",
+        "assumption",
+        "causal_status",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "source_hypothesis_id": { "$ref": "#/$defs/uuid" },
+        "target_hypothesis_id": { "$ref": "#/$defs/uuid" },
+        "polarity": {
+          "enum": [
+            "SUPPORTS_IF_SOURCE_SUPPORT_LEADING",
+            "CHALLENGES_IF_SOURCE_SUPPORT_LEADING"
+          ]
+        },
+        "assumption": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "causal_status": { "const": "NOT_ESTABLISHED" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "beliefEdgeCreatedPayload": {
+      "type": "object",
+      "required": ["belief_edge"],
+      "properties": {
+        "belief_edge": { "$ref": "#/$defs/beliefEdge" }
+      },
+      "additionalProperties": false
+    },
+    "beliefState": {
+      "enum": [
+        "SUPPORT_LEADING",
+        "CHALLENGE_LEADING",
+        "CONFLICTED",
+        "UNRESOLVED"
+      ]
+    },
+    "beliefIncomingEdgeEvaluation": {
+      "type": "object",
+      "required": [
+        "edge_id",
+        "source_hypothesis_id",
+        "source_state",
+        "disposition"
+      ],
+      "properties": {
+        "edge_id": { "$ref": "#/$defs/uuid" },
+        "source_hypothesis_id": { "$ref": "#/$defs/uuid" },
+        "source_state": { "$ref": "#/$defs/beliefState" },
+        "disposition": {
+          "enum": [
+            "APPLIED_SUPPORT",
+            "APPLIED_CHALLENGE",
+            "WITHHELD_SOURCE_NOT_SUPPORT_LEADING"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "beliefNodeResult": {
+      "type": "object",
+      "required": [
+        "hypothesis_id",
+        "state",
+        "direct_support_unit_count",
+        "direct_challenge_unit_count",
+        "conditional_support_unit_count",
+        "conditional_challenge_unit_count",
+        "conflicted_unit_count",
+        "input_claim_ids",
+        "dependency_group_ids",
+        "incoming_edge_evaluations",
+        "independence_state",
+        "interpretation"
+      ],
+      "properties": {
+        "hypothesis_id": { "$ref": "#/$defs/uuid" },
+        "state": { "$ref": "#/$defs/beliefState" },
+        "direct_support_unit_count": { "type": "integer", "minimum": 0 },
+        "direct_challenge_unit_count": { "type": "integer", "minimum": 0 },
+        "conditional_support_unit_count": { "type": "integer", "minimum": 0 },
+        "conditional_challenge_unit_count": { "type": "integer", "minimum": 0 },
+        "conflicted_unit_count": { "type": "integer", "minimum": 0 },
+        "input_claim_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "dependency_group_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "incoming_edge_evaluations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/beliefIncomingEdgeEvaluation" }
+        },
+        "independence_state": {
+          "enum": [
+            "DECLARED_DEPENDENCY_GROUPS_PRESERVED",
+            "INDEPENDENCE_NOT_ESTABLISHED"
+          ]
+        },
+        "interpretation": {
+          "const": "DIAGNOSTIC_SIGNAL_BALANCE_NOT_TRUTH_PROBABILITY"
+        }
+      },
+      "additionalProperties": false
+    },
+    "beliefGraphResult": {
+      "type": "object",
+      "required": ["node_count", "edge_count", "acyclic", "topological_order"],
+      "properties": {
+        "node_count": { "type": "integer", "minimum": 1 },
+        "edge_count": { "type": "integer", "minimum": 0 },
+        "acyclic": { "const": true },
+        "topological_order": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "beliefExecutionReceipt": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "asset_state_version",
+        "input_snapshot_sha256",
+        "hypothesis_ids",
+        "belief_edge_ids",
+        "claim_ids",
+        "evidence_link_ids",
+        "dependency_ids",
+        "algorithm_id",
+        "implementation_sha256",
+        "outcome_sha256",
+        "runtime",
+        "network_access",
+        "probability_state",
+        "prediction_state",
+        "executed_at",
+        "authority_state"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "asset_state_version": { "$ref": "#/$defs/uuid" },
+        "input_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "hypothesis_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "belief_edge_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "claim_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "evidence_link_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "dependency_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "algorithm_id": {
+          "const": "readin.reference.belief.dependency-aware-categorical-dag.v0.1"
+        },
+        "implementation_sha256": { "$ref": "#/$defs/sha256" },
+        "outcome_sha256": { "$ref": "#/$defs/sha256" },
+        "runtime": { "const": "LOCAL_DETERMINISTIC_REFERENCE" },
+        "network_access": { "const": false },
+        "probability_state": { "const": "NOT_COMPUTED" },
+        "prediction_state": { "const": "NOT_REQUESTED" },
+        "executed_at": { "$ref": "#/$defs/timestamp" },
+        "authority_state": { "const": "NO_AUTHORITY" }
+      },
+      "additionalProperties": false
+    },
+    "beliefRevision": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "graph",
+        "node_results",
+        "probability_state",
+        "uncertainty_state",
+        "empirical_validity_state",
+        "prediction_state",
+        "execution_receipt",
+        "recorded_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "graph": { "$ref": "#/$defs/beliefGraphResult" },
+        "node_results": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/beliefNodeResult" },
+          "uniqueItems": true
+        },
+        "probability_state": { "const": "NOT_COMPUTED" },
+        "uncertainty_state": { "const": "NOT_CALIBRATED" },
+        "empirical_validity_state": { "const": "NOT_ESTABLISHED" },
+        "prediction_state": { "const": "NOT_REQUESTED" },
+        "execution_receipt": { "$ref": "#/$defs/beliefExecutionReceipt" },
+        "recorded_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "beliefRevisionCompletedPayload": {
+      "type": "object",
+      "required": ["belief_revision"],
+      "properties": {
+        "belief_revision": { "$ref": "#/$defs/beliefRevision" }
+      },
+      "additionalProperties": false
+    },
+    "scenarioAssumption": {
+      "type": "object",
+      "required": ["id", "statement", "validation_state"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "statement": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "validation_state": { "const": "USER_SUPPLIED_NOT_VALIDATED" }
+      },
+      "additionalProperties": false
+    },
+    "scenarioIntervention": {
+      "type": "object",
+      "required": ["id", "target_entity_id", "description", "causal_status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "target_entity_id": { "$ref": "#/$defs/uuid" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "causal_status": { "const": "NOT_ESTABLISHED" }
+      },
+      "additionalProperties": false
+    },
+    "scenarioCondition": {
+      "type": "object",
+      "required": ["hypothesis_id", "expected_state"],
+      "properties": {
+        "hypothesis_id": { "$ref": "#/$defs/uuid" },
+        "expected_state": {
+          "enum": ["SUPPORT_LEADING", "CHALLENGE_LEADING"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "scenarioBranch": {
+      "type": "object",
+      "required": [
+        "id",
+        "parent_branch_id",
+        "kind",
+        "name",
+        "outcome_statement",
+        "condition",
+        "assumption_ids",
+        "intervention_ids",
+        "transition_support_state"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "parent_branch_id": { "$ref": "#/$defs/nullableUuid" },
+        "kind": { "enum": ["CONDITIONAL", "UNKNOWN_UNMODELED"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "outcome_statement": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "condition": {
+          "oneOf": [{ "$ref": "#/$defs/scenarioCondition" }, { "type": "null" }]
+        },
+        "assumption_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "intervention_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "transition_support_state": {
+          "enum": ["USER_DEFINED_NOT_VALIDATED", "UNMODELED"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "scenario": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "name",
+        "mode",
+        "initial_state_version",
+        "belief_revision_id",
+        "target_entity_ids",
+        "start_time",
+        "horizon_days",
+        "assumptions",
+        "interventions",
+        "branches",
+        "unknown_branch_policy",
+        "likelihood_state",
+        "prediction_state",
+        "empirical_validity_state",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "mode": { "const": "CONDITIONAL_EXPLORATION" },
+        "initial_state_version": { "$ref": "#/$defs/uuid" },
+        "belief_revision_id": { "$ref": "#/$defs/uuid" },
+        "target_entity_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "start_time": { "$ref": "#/$defs/timestamp" },
+        "horizon_days": { "type": "integer", "minimum": 1, "maximum": 3650 },
+        "assumptions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/scenarioAssumption" },
+          "uniqueItems": true
+        },
+        "interventions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/scenarioIntervention" },
+          "uniqueItems": true
+        },
+        "branches": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/scenarioBranch" },
+          "uniqueItems": true
+        },
+        "unknown_branch_policy": { "const": "REQUIRED_VISIBLE" },
+        "likelihood_state": { "const": "NOT_COMPUTED" },
+        "prediction_state": { "const": "NOT_REQUESTED" },
+        "empirical_validity_state": { "const": "NOT_ESTABLISHED" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "scenarioCreatedPayload": {
+      "type": "object",
+      "required": ["scenario"],
+      "properties": {
+        "scenario": { "$ref": "#/$defs/scenario" }
+      },
+      "additionalProperties": false
+    },
+    "scenarioBranchResult": {
+      "type": "object",
+      "required": [
+        "branch_id",
+        "branch_kind",
+        "parent_branch_id",
+        "source_hypothesis_id",
+        "source_revision_state",
+        "antecedent_state",
+        "likelihood_state",
+        "trajectory_state",
+        "outcome_state"
+      ],
+      "properties": {
+        "branch_id": { "$ref": "#/$defs/uuid" },
+        "branch_kind": { "enum": ["CONDITIONAL", "UNKNOWN_UNMODELED"] },
+        "parent_branch_id": { "$ref": "#/$defs/nullableUuid" },
+        "source_hypothesis_id": { "$ref": "#/$defs/nullableUuid" },
+        "source_revision_state": {
+          "oneOf": [{ "$ref": "#/$defs/beliefState" }, { "type": "null" }]
+        },
+        "antecedent_state": {
+          "enum": [
+            "CONDITION_MATCHED",
+            "CONDITION_NOT_MATCHED",
+            "CONDITION_UNRESOLVED",
+            "BLOCKED_BY_PARENT",
+            "UNMODELED_REGION_RETAINED"
+          ]
+        },
+        "likelihood_state": { "const": "NOT_COMPUTED" },
+        "trajectory_state": {
+          "enum": ["USER_DEFINED_NOT_SIMULATED", "UNMODELED_NOT_SIMULATED"]
+        },
+        "outcome_state": { "const": "CONDITIONAL_NOT_PREDICTED" }
+      },
+      "additionalProperties": false
+    },
+    "scenarioSummary": {
+      "type": "object",
+      "required": [
+        "conditional_branch_count",
+        "matched_branch_count",
+        "unresolved_branch_count",
+        "unknown_branch_visible"
+      ],
+      "properties": {
+        "conditional_branch_count": { "type": "integer", "minimum": 1 },
+        "matched_branch_count": { "type": "integer", "minimum": 0 },
+        "unresolved_branch_count": { "type": "integer", "minimum": 0 },
+        "unknown_branch_visible": { "const": true }
+      },
+      "additionalProperties": false
+    },
+    "scenarioExecutionReceipt": {
+      "type": "object",
+      "required": [
+        "id",
+        "scenario_id",
+        "asset_entity_id",
+        "asset_state_version",
+        "scenario_snapshot_sha256",
+        "belief_revision_id",
+        "belief_revision_sha256",
+        "branch_ids",
+        "assumption_ids",
+        "intervention_ids",
+        "algorithm_id",
+        "implementation_sha256",
+        "outcome_sha256",
+        "runtime",
+        "fitter_execution_state",
+        "network_access",
+        "likelihood_state",
+        "trajectory_state",
+        "prediction_state",
+        "executed_at",
+        "authority_state"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "scenario_id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "asset_state_version": { "$ref": "#/$defs/uuid" },
+        "scenario_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "belief_revision_id": { "$ref": "#/$defs/uuid" },
+        "belief_revision_sha256": { "$ref": "#/$defs/sha256" },
+        "branch_ids": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "assumption_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "intervention_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "algorithm_id": {
+          "const": "readin.reference.scenario.conditional-branch-evaluation.v0.1"
+        },
+        "implementation_sha256": { "$ref": "#/$defs/sha256" },
+        "outcome_sha256": { "$ref": "#/$defs/sha256" },
+        "runtime": { "const": "LOCAL_DETERMINISTIC_REFERENCE" },
+        "fitter_execution_state": {
+          "const": "NOT_RUN_NO_FORECAST_CAPABLE_FITTER"
+        },
+        "network_access": { "const": false },
+        "likelihood_state": { "const": "NOT_COMPUTED" },
+        "trajectory_state": { "const": "NOT_SIMULATED" },
+        "prediction_state": { "const": "NOT_REQUESTED" },
+        "executed_at": { "$ref": "#/$defs/timestamp" },
+        "authority_state": { "const": "NO_AUTHORITY" }
+      },
+      "additionalProperties": false
+    },
+    "scenarioRun": {
+      "type": "object",
+      "required": [
+        "id",
+        "scenario_id",
+        "asset_entity_id",
+        "branch_results",
+        "summary",
+        "fitter_execution_state",
+        "likelihood_state",
+        "trajectory_state",
+        "prediction_state",
+        "empirical_validity_state",
+        "execution_receipt",
+        "recorded_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "scenario_id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "branch_results": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/scenarioBranchResult" },
+          "uniqueItems": true
+        },
+        "summary": { "$ref": "#/$defs/scenarioSummary" },
+        "fitter_execution_state": {
+          "const": "NOT_RUN_NO_FORECAST_CAPABLE_FITTER"
+        },
+        "likelihood_state": { "const": "NOT_COMPUTED" },
+        "trajectory_state": { "const": "NOT_SIMULATED" },
+        "prediction_state": { "const": "NOT_REQUESTED" },
+        "empirical_validity_state": { "const": "NOT_ESTABLISHED" },
+        "execution_receipt": { "$ref": "#/$defs/scenarioExecutionReceipt" },
+        "recorded_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "scenarioRunCompletedPayload": {
+      "type": "object",
+      "required": ["scenario_run"],
+      "properties": {
+        "scenario_run": { "$ref": "#/$defs/scenarioRun" }
       },
       "additionalProperties": false
     }

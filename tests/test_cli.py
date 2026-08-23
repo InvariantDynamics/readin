@@ -5,7 +5,7 @@ from pathlib import Path
 
 from readin.cli import main
 from readin.store import EventLedger
-from readin.synthetic import phase1_events, phase2_events, phase3_events
+from readin.synthetic import phase1_events, phase2_events, phase3_events, phase5_events
 
 
 def test_cli_initializes_and_tracks_entity(tmp_path: Path, capsys: object) -> None:
@@ -283,3 +283,43 @@ def test_cli_registers_and_runs_reference_fitters_without_consensus(
     ]
     assert output["consensus"]["state"] == "NOT_COMPUTED"
     assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_exposes_belief_revision_and_non_predictive_scenario(
+    tmp_path: Path, capsys: object
+) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase5_events():
+        ledger.append(event)
+
+    result = main(
+        [
+            "show-belief-revision",
+            "--ledger",
+            str(ledger.path),
+            "--revision",
+            "84848484-8484-4484-8484-848484848481",
+        ]
+    )
+    revision = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert revision["probability_state"] == "NOT_COMPUTED"
+    assert revision["dependency_policy"] == "GROUP_BY_DECLARED_ANCESTRY"
+    assert revision["authority_state"] == "NO_AUTHORITY"
+
+    result = main(
+        [
+            "show-scenario-run",
+            "--ledger",
+            str(ledger.path),
+            "--run",
+            "89898989-8989-4989-8989-898989898981",
+        ]
+    )
+    scenario = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert scenario["run"]["summary"]["unknown_branch_visible"] is True
+    assert scenario["trajectory_state"] == "NOT_SIMULATED"
+    assert scenario["prediction_state"] == "NOT_REQUESTED"
+    assert scenario["authority_state"] == "NO_AUTHORITY"

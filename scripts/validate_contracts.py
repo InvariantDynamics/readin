@@ -1,4 +1,4 @@
-"""Validate the schema, Phase 4 loop, and fail-closed negative vectors."""
+"""Validate the schema, Phase 5 loop, and fail-closed negative vectors."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator
 from readin.contracts import ContractViolation, load_event_schema, validate_event
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
-from readin.synthetic import phase4_events
+from readin.synthetic import phase5_events
 
 
 def _must_reject_contract(event: dict[str, object]) -> None:
@@ -23,7 +23,7 @@ def _must_reject_contract(event: dict[str, object]) -> None:
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
-    events = phase4_events()
+    events = phase5_events()
     for event in events:
         validate_event(event)
     projection = ReadinProjection.replay(events)
@@ -39,6 +39,14 @@ def main() -> None:
     invalid_merge = deepcopy(events[18])
     invalid_merge["payload"]["resolution_candidate"]["merge_state"] = "MERGED"
     _must_reject_contract(invalid_merge)
+
+    invalid_belief_contract = deepcopy(events[34])
+    invalid_belief_contract["payload"]["belief_revision"]["probability_state"] = "COMPUTED"
+    _must_reject_contract(invalid_belief_contract)
+
+    invalid_scenario_contract = deepcopy(events[35])
+    invalid_scenario_contract["payload"]["scenario"]["prediction_state"] = "FORECAST"
+    _must_reject_contract(invalid_scenario_contract)
 
     try:
         ReadinProjection.replay([events[4]])
@@ -160,15 +168,58 @@ def main() -> None:
     if fitter_view["outcome_counts"]["INVALID"] != 1:
         raise AssertionError("multi-fitter runtime suppressed model invalidity")
 
+    invalid_belief = deepcopy(events[34])
+    invalid_belief["payload"]["belief_revision"]["execution_receipt"]["input_snapshot_sha256"] = (
+        "0" * 64
+    )
+    try:
+        ReadinProjection.replay([*events[:34], invalid_belief])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("belief revision with invalid input digest was accepted")
+
+    invalid_scenario = deepcopy(events[35])
+    invalid_scenario["payload"]["scenario"]["branches"] = [
+        branch
+        for branch in invalid_scenario["payload"]["scenario"]["branches"]
+        if branch["kind"] != "UNKNOWN_UNMODELED"
+    ]
+    try:
+        ReadinProjection.replay([*events[:35], invalid_scenario])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("scenario without an unknown branch was accepted")
+
+    invalid_scenario_run = deepcopy(events[36])
+    invalid_scenario_run["payload"]["scenario_run"]["branch_results"][0]["antecedent_state"] = (
+        "CONDITION_NOT_MATCHED"
+    )
+    try:
+        ReadinProjection.replay([*events[:36], invalid_scenario_run])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("non-reference scenario evaluation was accepted")
+
+    scenario_view = projection.scenario_run_view("89898989-8989-4989-8989-898989898981")
+    if not scenario_view["run"]["summary"]["unknown_branch_visible"]:
+        raise AssertionError("scenario runtime suppressed the unmodeled region")
+    if scenario_view["prediction_state"] != "NOT_REQUESTED":
+        raise AssertionError("scenario runtime promoted branch evaluation to prediction")
+
     print(
-        f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=3 "
-        f"negative_semantic_vectors=10 tracked_assets={len(projection.assets)} "
+        f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=5 "
+        f"negative_semantic_vectors=13 tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
         f"resolution_candidates={len(projection.resolution_candidates)} "
         f"cartographic_surfaces={len(projection.cartographic_surfaces)} "
         f"cartographic_query_plans={len(projection.cartographic_query_plans)} "
         f"fitters={len(projection.fitters)} fitter_runs={len(projection.fitter_runs)} "
-        f"fit_results={len(projection.fit_results)}"
+        f"fit_results={len(projection.fit_results)} hypotheses={len(projection.hypotheses)} "
+        f"belief_revisions={len(projection.belief_revisions)} "
+        f"scenarios={len(projection.scenarios)} scenario_runs={len(projection.scenario_runs)}"
     )
 
 

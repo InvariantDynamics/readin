@@ -1,4 +1,4 @@
-"""Typed event factories for the READIN Phase 0 through Phase 4 contracts."""
+"""Typed event factories for the READIN Phase 0 through Phase 5 contracts."""
 
 from __future__ import annotations
 
@@ -638,6 +638,123 @@ def create_fitter_run_completed(
     return _event(
         "fitter.run_completed",
         {"fitter_run": dict(fitter_run)},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_hypothesis_created(
+    asset_entity_id: str | UUID,
+    name: str,
+    statement: str,
+    claim_bindings: Iterable[Mapping[str, Any]],
+    *,
+    target_entity_ids: Iterable[str | UUID] = (),
+    hypothesis_id: str | UUID | None = None,
+    created_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    selected_asset_id = _uuid(asset_entity_id)
+    targets = [_uuid(item) for item in target_entity_ids] or [selected_asset_id]
+    hypothesis = {
+        "id": _uuid(hypothesis_id),
+        "asset_entity_id": selected_asset_id,
+        "name": name,
+        "proposition": {
+            "statement": statement,
+            "modality": "HYPOTHETICAL",
+        },
+        "target_entity_ids": targets,
+        "claim_bindings": [
+            {
+                "claim_id": _uuid(item["claim_id"]),
+                "polarity": item["polarity"],
+            }
+            for item in claim_bindings
+        ],
+        "state": "UNRESOLVED",
+        "probability_state": "NOT_COMPUTED",
+        "created_at": _timestamp(created_at or event_time),
+    }
+    return _event(
+        "hypothesis.created",
+        {"hypothesis": hypothesis},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_belief_edge_created(
+    source_hypothesis_id: str | UUID,
+    target_hypothesis_id: str | UUID,
+    polarity: str,
+    assumption: str,
+    *,
+    edge_id: str | UUID | None = None,
+    created_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    edge = {
+        "id": _uuid(edge_id),
+        "source_hypothesis_id": _uuid(source_hypothesis_id),
+        "target_hypothesis_id": _uuid(target_hypothesis_id),
+        "polarity": polarity,
+        "assumption": assumption,
+        "causal_status": "NOT_ESTABLISHED",
+        "created_at": _timestamp(created_at or event_time),
+    }
+    return _event(
+        "belief.edge_created",
+        {"belief_edge": edge},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_belief_revision_completed(
+    belief_revision: Mapping[str, Any],
+    *,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    return _event(
+        "belief.revision_completed",
+        {"belief_revision": dict(belief_revision)},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_scenario_created(
+    scenario: Mapping[str, Any],
+    *,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    return _event(
+        "scenario.created",
+        {"scenario": dict(scenario)},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_scenario_run_completed(
+    scenario_run: Mapping[str, Any],
+    *,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    return _event(
+        "scenario.run_completed",
+        {"scenario_run": dict(scenario_run)},
         event_id=event_id,
         occurred_at=event_time,
     )

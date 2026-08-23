@@ -29,8 +29,8 @@ contracts and receipts; it does not redefine OFS Core.
 
 ## Current executable slice
 
-The current foundation, bounded Array, resolution, cartography, and multi-fitter slices implement
-one local epistemic loop:
+The current foundation, bounded Array, resolution, cartography, multi-fitter, belief, and scenario
+slices implement one local epistemic loop:
 
 1. Create a typed entity and start tracking it as an asset.
 2. Register an observer frame.
@@ -54,16 +54,24 @@ one local epistemic loop:
 17. Execute one cartographic query across those heterogeneous fitters with digest-bound receipts.
 18. Retain method-specific outputs, invalidity, abstention, and partial run groups without averaging
     them into consensus.
+19. Create unresolved hypotheses with explicit claim polarity bindings.
+20. Connect hypotheses through assumption-bound directed edges while rejecting cycles.
+21. Produce a dependency-aware categorical belief revision with a digest-bound receipt.
+22. Create an assumption- and intervention-bound scenario tree with a required unknown branch.
+23. Evaluate branch antecedents against one immutable belief revision without assigning likelihoods
+    or simulating trajectories.
 
-This slice uses manual, synthetic input only. Cartographic and fitter execution are read-only local
-diagnostics; `coverage_state` remains `NOT_ESTABLISHED`, completeness is never claimed, and post-cutoff surface
-definitions are labeled as hindsight in the query lens. Fitter empirical validity is
-`NOT_ESTABLISHED`, residual readback is not performed, and the Bayesian output is explicitly a
-diagnostic index rather than a truth probability. It performs no network collection, entity merging,
-automated claim extraction, forecasting, targeting, or external action. A claim
-remains unresolved even when evidence is linked, and repeated dependent evidence is never counted
-as independent corroboration. Candidate resolution is review history only: it never performs a
-canonical entity merge.
+This slice uses manual, synthetic input only. Cartographic, fitter, belief, and scenario execution is
+local and deterministic; `coverage_state` remains `NOT_ESTABLISHED`, completeness is never claimed,
+and post-cutoff surface definitions are labeled as hindsight in the query lens. Fitter and scenario
+empirical validity is `NOT_ESTABLISHED`, residual readback is not performed, and Bayesian and belief
+outputs are explicitly diagnostic rather than truth probabilities. Scenario branches are
+user-defined conditional structures: likelihood is `NOT_COMPUTED`, trajectories are
+`NOT_SIMULATED`, and the unknown/unmodeled region remains visible. The slice performs no network
+collection, entity merging, automated claim extraction, forecasting, targeting, or external action.
+A claim remains unresolved even when evidence is linked, and repeated dependent evidence is never
+counted as independent corroboration. Candidate resolution is review history only: it never performs
+a canonical entity merge.
 
 ## Quick start
 
@@ -98,6 +106,10 @@ uv run readin run-fitters --ledger .readin/events.jsonl \
   --query <query-id> --fitter <fitter-id>
 uv run readin show-multi-fitter-run --ledger .readin/events.jsonl \
   --run-group <run-group-id>
+uv run readin show-belief-revision --ledger .readin/events.jsonl \
+  --revision <belief-revision-id>
+uv run readin show-scenario-run --ledger .readin/events.jsonl \
+  --run <scenario-run-id>
 ```
 
 Commands emit JSON so their identifiers can be captured by scripts. Run `uv run readin --help` for
