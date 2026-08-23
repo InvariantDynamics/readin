@@ -29,8 +29,8 @@ contracts and receipts; it does not redefine OFS Core.
 
 ## Current executable slice
 
-The current foundation, bounded Array, resolution, and cartography slices implement one local
-epistemic loop:
+The current foundation, bounded Array, resolution, cartography, and multi-fitter slices implement
+one local epistemic loop:
 
 1. Create a typed entity and start tracking it as an asset.
 2. Register an observer frame.
@@ -49,11 +49,18 @@ epistemic loop:
 14. Persist a backward query plan with a selected surface, traversal bound, and reconstruction mode.
 15. Execute that plan deterministically against the local ledger while reporting aperture exclusions
     and hindsight introduced by the query lens.
+16. Register deterministic Bayesian, graph, and temporal diagnostic fitters with closed
+    admissibility and validity boundaries.
+17. Execute one cartographic query across those heterogeneous fitters with digest-bound receipts.
+18. Retain method-specific outputs, invalidity, abstention, and partial run groups without averaging
+    them into consensus.
 
-This slice uses manual, synthetic input only. Cartographic execution is a read-only local replay;
-`coverage_state` remains `NOT_ESTABLISHED`, completeness is never claimed, and post-cutoff surface
-definitions are labeled as hindsight in the query lens. It performs no network collection, entity merging,
-automated claim extraction, model inference, prediction, targeting, or external action. A claim
+This slice uses manual, synthetic input only. Cartographic and fitter execution are read-only local
+diagnostics; `coverage_state` remains `NOT_ESTABLISHED`, completeness is never claimed, and post-cutoff surface
+definitions are labeled as hindsight in the query lens. Fitter empirical validity is
+`NOT_ESTABLISHED`, residual readback is not performed, and the Bayesian output is explicitly a
+diagnostic index rather than a truth probability. It performs no network collection, entity merging,
+automated claim extraction, forecasting, targeting, or external action. A claim
 remains unresolved even when evidence is linked, and repeated dependent evidence is never counted
 as independent corroboration. Candidate resolution is review history only: it never performs a
 canonical entity merge.
@@ -85,6 +92,12 @@ uv run readin plan-cartographic-query --ledger .readin/events.jsonl \
   --asset <entity-id> --surface <surface-id> --mode AS_KNOWN_THEN \
   --epistemic-cutoff <ISO-8601-cutoff-at-or-after-tracking>
 uv run readin run-cartographic-query --ledger .readin/events.jsonl --query <query-id>
+uv run readin register-reference-fitter --ledger .readin/events.jsonl \
+  --class BAYESIAN
+uv run readin run-fitters --ledger .readin/events.jsonl \
+  --query <query-id> --fitter <fitter-id>
+uv run readin show-multi-fitter-run --ledger .readin/events.jsonl \
+  --run-group <run-group-id>
 ```
 
 Commands emit JSON so their identifiers can be captured by scripts. Run `uv run readin --help` for

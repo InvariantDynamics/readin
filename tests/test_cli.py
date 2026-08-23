@@ -225,3 +225,61 @@ def test_cli_registers_surface_and_persists_backward_plan(tmp_path: Path, capsys
     assert plan["direction"] == "BACKWARD"
     assert plan["traversal"]["max_relation_hops"] == 1
     assert plan["execution_state"] == "PLANNED_READ_ONLY"
+
+
+def test_cli_registers_and_runs_reference_fitters_without_consensus(
+    tmp_path: Path, capsys: object
+) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase3_events():
+        ledger.append(event)
+
+    registrations = (
+        ("BAYESIAN", "74747474-7474-4747-8474-747474747474"),
+        ("GRAPH", "75757575-7575-4757-8575-757575757575"),
+        ("TEMPORAL", "76767676-7676-4767-8676-767676767676"),
+    )
+    for fitter_class, fitter_id in registrations:
+        result = main(
+            [
+                "register-reference-fitter",
+                "--ledger",
+                str(ledger.path),
+                "--class",
+                fitter_class,
+                "--fitter-id",
+                fitter_id,
+            ]
+        )
+        output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+        assert result == 0
+        assert output["event_type"] == "fitter.registered"
+
+    result = main(
+        [
+            "run-fitters",
+            "--ledger",
+            str(ledger.path),
+            "--query",
+            "39393939-3939-4393-8393-393939393939",
+            "--fitter",
+            registrations[0][1],
+            "--fitter",
+            registrations[1][1],
+            "--fitter",
+            registrations[2][1],
+            "--run-group-id",
+            "77777777-7777-4777-8777-777777777771",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+
+    assert result == 0
+    assert output["outcome_counts"] == {"ABSTAINED": 0, "FIT": 2, "INVALID": 1}
+    assert output["disagreement"]["signals"] == [
+        "MODEL_INVALIDITY_PRESENT",
+        "OUTPUTS_INCOMMENSURATE",
+    ]
+    assert output["consensus"]["state"] == "NOT_COMPUTED"
+    assert output["authority_state"] == "NO_AUTHORITY"

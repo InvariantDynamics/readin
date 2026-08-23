@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 through Phase 3 runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 4 runtime."""
 
 from __future__ import annotations
 
@@ -24,6 +24,11 @@ from readin.events import (
     create_resolution_candidate_assessed,
     create_resolution_candidate_recorded,
     create_tracking_started,
+)
+from readin.fitters import (
+    FitterRuntimeError,
+    create_reference_fitter_registration,
+    execute_reference_fitter_group,
 )
 from readin.projection import ProjectionError
 from readin.store import EventLedger, LedgerError
@@ -314,6 +319,28 @@ def _build_parser() -> argparse.ArgumentParser:
     query_parser.add_argument("--no-relations", action="store_true")
     query_parser.add_argument("--query-id")
 
+    fitter_parser = subparsers.add_parser(
+        "register-reference-fitter",
+        help="Register a deterministic local Bayesian, graph, or temporal diagnostic fitter",
+    )
+    _add_ledger_argument(fitter_parser)
+    fitter_parser.add_argument(
+        "--class",
+        required=True,
+        choices=("BAYESIAN", "GRAPH", "TEMPORAL"),
+        dest="fitter_class",
+    )
+    fitter_parser.add_argument("--fitter-id")
+
+    run_fitters_parser = subparsers.add_parser(
+        "run-fitters",
+        help="Run registered reference fitters over one persisted cartographic query",
+    )
+    _add_ledger_argument(run_fitters_parser)
+    run_fitters_parser.add_argument("--query", required=True)
+    run_fitters_parser.add_argument("--fitter", required=True, action="append")
+    run_fitters_parser.add_argument("--run-group-id")
+
     show_parser = subparsers.add_parser("show-asset", help="Replay and inspect one tracked asset")
     _add_ledger_argument(show_parser)
     show_parser.add_argument("--asset", required=True)
@@ -353,6 +380,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_ledger_argument(run_query_parser)
     run_query_parser.add_argument("--query", required=True)
+
+    fitter_view_parser = subparsers.add_parser(
+        "show-fitter", help="Inspect one fitter descriptor and its retained runs"
+    )
+    _add_ledger_argument(fitter_view_parser)
+    fitter_view_parser.add_argument("--fitter", required=True)
+
+    fitter_run_view_parser = subparsers.add_parser(
+        "show-fitter-run", help="Inspect one fitter result or abstention with its receipt"
+    )
+    _add_ledger_argument(fitter_run_view_parser)
+    fitter_run_view_parser.add_argument("--run", required=True)
+
+    multi_fitter_view_parser = subparsers.add_parser(
+        "show-multi-fitter-run",
+        help="Inspect retained heterogeneous outcomes without computing consensus",
+    )
+    _add_ledger_argument(multi_fitter_view_parser)
+    multi_fitter_view_parser.add_argument("--run-group", required=True)
 
     list_parser = subparsers.add_parser("list-assets", help="Replay and list the tracked catalog")
     _add_ledger_argument(list_parser)
@@ -562,6 +608,27 @@ def _run(args: argparse.Namespace) -> Any:
         ledger.append(event)
         return event
 
+    if args.command == "register-reference-fitter":
+        event = create_reference_fitter_registration(
+            args.fitter_class,
+            fitter_id=args.fitter_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "run-fitters":
+        projection = ledger.projection()
+        events = execute_reference_fitter_group(
+            projection,
+            args.query,
+            args.fitter,
+            run_group_id=args.run_group_id,
+        )
+        for event in events:
+            ledger.append(event)
+        run_group_id = events[0]["payload"]["fitter_run"]["run_group_id"]
+        return ledger.projection().multi_fitter_run_view(run_group_id)
+
     projection = ledger.projection()
     if args.command == "show-asset":
         return projection.asset_view_at(
@@ -583,6 +650,12 @@ def _run(args: argparse.Namespace) -> Any:
         return projection.cartographic_query_plan_view(args.query)
     if args.command == "run-cartographic-query":
         return projection.execute_cartographic_query(args.query)
+    if args.command == "show-fitter":
+        return projection.fitter_view(args.fitter)
+    if args.command == "show-fitter-run":
+        return projection.fitter_run_view(args.run)
+    if args.command == "show-multi-fitter-run":
+        return projection.multi_fitter_run_view(args.run_group)
     if args.command == "list-assets":
         return projection.catalog_view()
     raise AssertionError(f"unhandled command: {args.command}")
@@ -594,6 +667,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         _emit(_run(args))
         return 0
-    except (ContractViolation, LedgerError, ProjectionError, ValueError) as error:
+    except (
+        ContractViolation,
+        FitterRuntimeError,
+        LedgerError,
+        ProjectionError,
+        ValueError,
+    ) as error:
         print(f"readin: {error}", file=sys.stderr)
         return 2

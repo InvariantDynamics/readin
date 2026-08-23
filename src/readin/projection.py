@@ -1,4 +1,4 @@
-"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 3 ledger."""
+"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 4 ledger."""
 
 from __future__ import annotations
 
@@ -7,6 +7,14 @@ from datetime import datetime
 from typing import Any
 
 from readin.contracts import validate_event
+from readin.fitters import (
+    FitterRuntimeError,
+    canonical_sha256,
+    evaluate_reference_admissibility,
+    reference_fit_components,
+    reference_fitter_spec,
+    validate_reference_descriptor,
+)
 
 
 class ProjectionError(ValueError):
@@ -30,6 +38,10 @@ class ReadinProjection:
         self.resolution_assessments: dict[str, dict[str, Any]] = {}
         self.cartographic_surfaces: dict[str, dict[str, Any]] = {}
         self.cartographic_query_plans: dict[str, dict[str, Any]] = {}
+        self.fitters: dict[str, dict[str, Any]] = {}
+        self.fitter_runs: dict[str, dict[str, Any]] = {}
+        self.fit_results: dict[str, dict[str, Any]] = {}
+        self.fitter_receipts: dict[str, dict[str, Any]] = {}
         self.asset_versions: dict[str, list[dict[str, Any]]] = {}
         self.event_ids: set[str] = set()
         self._evidence_digests: dict[str, str] = {}
@@ -39,6 +51,9 @@ class ReadinProjection:
         self._latest_resolution_assessment: dict[str, str] = {}
         self._cartographic_surface_recorded_at: dict[str, str] = {}
         self._cartographic_query_recorded_at: dict[str, str] = {}
+        self._fitter_recorded_at: dict[str, str] = {}
+        self._fitter_run_groups: dict[str, dict[str, Any]] = {}
+        self._fitter_run_pairs: set[tuple[str, str]] = set()
         self._events: list[dict[str, Any]] = []
 
     @classmethod
@@ -429,6 +444,216 @@ class ReadinProjection:
         self._cartographic_query_recorded_at[query_id] = event["occurred_at"]
         self._advance_asset(asset_id, event)
 
+    def _apply_fitter_registered(self, event: dict[str, Any]) -> None:
+        descriptor = deepcopy(event["payload"]["fitter_descriptor"])
+        fitter_id = descriptor["id"]
+        if fitter_id in self.fitters:
+            raise ProjectionError(f"duplicate fitter id: {fitter_id}")
+        try:
+            validate_reference_descriptor(descriptor)
+        except FitterRuntimeError as error:
+            raise ProjectionError(str(error)) from error
+
+        self.fitters[fitter_id] = descriptor
+        self._fitter_recorded_at[fitter_id] = event["occurred_at"]
+
+    def _apply_fitter_run_completed(self, event: dict[str, Any]) -> None:
+        run = deepcopy(event["payload"]["fitter_run"])
+        run_id = run["id"]
+        receipt = run["execution_receipt"]
+        receipt_id = receipt["id"]
+        if run_id in self.fitter_runs:
+            raise ProjectionError(f"duplicate fitter run id: {run_id}")
+        if receipt_id in self.fitter_receipts:
+            raise ProjectionError(f"duplicate fitter receipt id: {receipt_id}")
+
+        fitter_id = run["fitter_id"]
+        if fitter_id not in self.fitters:
+            raise ProjectionError(f"fitter run references unknown fitter: {fitter_id}")
+        query_id = run["query_plan_id"]
+        if query_id not in self.cartographic_query_plans:
+            raise ProjectionError(f"fitter run references unknown query plan: {query_id}")
+        if (run["run_group_id"], fitter_id) in self._fitter_run_pairs:
+            raise ProjectionError("fitter already completed within this run group")
+
+        descriptor = self.fitters[fitter_id]
+        query_result = self.execute_cartographic_query(query_id)
+        asset_id = query_result["query_plan"]["asset_entity_id"]
+        expected_input_ids = self._fitter_input_ids(query_result)
+        expected_excluded_ids = sorted(query_result["aperture"]["excluded_asset_observation_ids"])
+        expected_input_sha256 = canonical_sha256(query_result)
+
+        self._validate_fitter_receipt_identity(
+            run,
+            receipt,
+            descriptor,
+            event,
+        )
+        for key, expected in expected_input_ids.items():
+            if receipt[key] != expected:
+                raise ProjectionError(f"fitter receipt {key} does not match query input")
+        if receipt["excluded_observation_ids"] != expected_excluded_ids:
+            raise ProjectionError("fitter receipt exclusions do not match query aperture")
+        if receipt["input_snapshot_sha256"] != expected_input_sha256:
+            raise ProjectionError("fitter receipt input snapshot digest mismatch")
+        requested_fitter_ids = receipt["requested_fitter_ids"]
+        if requested_fitter_ids != sorted(requested_fitter_ids):
+            raise ProjectionError("requested fitter ids must use deterministic sorted order")
+        unknown_requested_fitters = sorted(set(requested_fitter_ids) - self.fitters.keys())
+        if unknown_requested_fitters:
+            raise ProjectionError(
+                f"fitter receipt requests unknown fitters: {unknown_requested_fitters}"
+            )
+        if fitter_id not in requested_fitter_ids:
+            raise ProjectionError("completed fitter is absent from the requested fitter set")
+
+        group_id = run["run_group_id"]
+        group = self._fitter_run_groups.get(group_id)
+        new_group: dict[str, Any] | None = None
+        if group is None:
+            expected_state_version = self.assets[asset_id]["epistemic_state_version"]
+            if receipt["asset_state_version"] != expected_state_version:
+                raise ProjectionError("fitter receipt asset state version mismatch")
+            new_group = {
+                "query_plan_id": query_id,
+                "asset_entity_id": asset_id,
+                "asset_state_version": expected_state_version,
+                "input_snapshot_sha256": expected_input_sha256,
+                "requested_fitter_ids": requested_fitter_ids,
+            }
+        elif group != {
+            "query_plan_id": query_id,
+            "asset_entity_id": asset_id,
+            "asset_state_version": receipt["asset_state_version"],
+            "input_snapshot_sha256": expected_input_sha256,
+            "requested_fitter_ids": requested_fitter_ids,
+        }:
+            raise ProjectionError("fitter run group input binding mismatch")
+
+        expected_admissibility = evaluate_reference_admissibility(descriptor, query_result)
+        if run["admissibility"] != expected_admissibility:
+            raise ProjectionError("fitter admissibility result does not match reference evaluation")
+        expected_outcome = {
+            "ADMISSIBLE": "FIT",
+            "INADMISSIBLE": "ABSTAINED",
+            "INVALID": "INVALID",
+        }[expected_admissibility["status"]]
+        if run["outcome"] != expected_outcome:
+            raise ProjectionError("fitter outcome is inconsistent with admissibility")
+
+        fit_result = run["fit_result"]
+        spec = reference_fitter_spec(descriptor["fitter_class"])
+        if expected_outcome == "FIT":
+            if fit_result is None:
+                raise ProjectionError("admissible fitter run requires a fit result")
+            result_id = fit_result["id"]
+            if result_id in self.fit_results:
+                raise ProjectionError(f"duplicate fit result id: {result_id}")
+            components = reference_fit_components(descriptor, query_result)
+            self._validate_fit_result(
+                fit_result,
+                receipt,
+                descriptor,
+                query_id,
+                asset_id,
+                expected_input_ids,
+                components,
+            )
+        elif fit_result is not None:
+            raise ProjectionError("abstained or invalid fitter run cannot contain a fit result")
+
+        if receipt["assumptions"] != spec["assumptions"]:
+            raise ProjectionError("fitter receipt assumptions do not match reference fitter")
+        expected_outcome_sha256 = canonical_sha256(
+            {
+                "outcome": run["outcome"],
+                "admissibility": run["admissibility"],
+                "fit_result": fit_result,
+            }
+        )
+        if receipt["outcome_sha256"] != expected_outcome_sha256:
+            raise ProjectionError("fitter receipt outcome digest mismatch")
+
+        if new_group is not None:
+            self._fitter_run_groups[group_id] = new_group
+        self.fitter_runs[run_id] = run
+        self.fitter_receipts[receipt_id] = receipt
+        if fit_result is not None:
+            self.fit_results[fit_result["id"]] = fit_result
+        self._fitter_run_pairs.add((group_id, fitter_id))
+        self._advance_asset(asset_id, event)
+
+    def _validate_fitter_receipt_identity(
+        self,
+        run: dict[str, Any],
+        receipt: dict[str, Any],
+        descriptor: dict[str, Any],
+        event: dict[str, Any],
+    ) -> None:
+        expected_bindings = {
+            "run_group_id": run["run_group_id"],
+            "query_plan_id": run["query_plan_id"],
+            "fitter_id": run["fitter_id"],
+            "fitter_version": descriptor["version"],
+            "implementation_sha256": descriptor["implementation_sha256"],
+        }
+        mismatched = [
+            key for key, expected in expected_bindings.items() if receipt[key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"fitter receipt binding mismatch: {mismatched}")
+        if not (run["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("fitter execution times must match ledger-recorded time")
+
+    def _validate_fit_result(
+        self,
+        result: dict[str, Any],
+        receipt: dict[str, Any],
+        descriptor: dict[str, Any],
+        query_id: str,
+        asset_id: str,
+        expected_input_ids: dict[str, list[str]],
+        components: dict[str, Any],
+    ) -> None:
+        expected_bindings = {
+            "fitter_id": descriptor["id"],
+            "fitter_version": descriptor["version"],
+            "query_plan_id": query_id,
+            "asset_entity_id": asset_id,
+            "target_metric": descriptor["target_metric"],
+            "execution_receipt_id": receipt["id"],
+        }
+        mismatched = [key for key, expected in expected_bindings.items() if result[key] != expected]
+        if mismatched:
+            raise ProjectionError(f"fit result binding mismatch: {mismatched}")
+        for key, expected in expected_input_ids.items():
+            if result[key] != expected:
+                raise ProjectionError(f"fit result {key} does not match query input")
+        if result["estimate"] != components["estimate"]:
+            raise ProjectionError("fit result estimate does not match reference implementation")
+        if result["distribution"] != components["distribution"]:
+            raise ProjectionError("fit result distribution does not match reference implementation")
+        if result["assumptions"] != components["assumptions"]:
+            raise ProjectionError("fit result assumptions do not match reference implementation")
+        expected_validity = {
+            "status": descriptor["declared_validity"]["status"],
+            "domain": descriptor["declared_validity"]["domain"],
+            "boundary_proximity": None,
+            "invalid_conditions": descriptor["declared_validity"]["invalid_conditions"],
+        }
+        if result["validity"] != expected_validity:
+            raise ProjectionError("fit result validity does not match descriptor boundary")
+
+    def _fitter_input_ids(self, query_result: dict[str, Any]) -> dict[str, list[str]]:
+        return {
+            "input_observation_ids": sorted(item["id"] for item in query_result["observations"]),
+            "input_claim_ids": sorted(item["claim"]["id"] for item in query_result["claims"]),
+            "input_relation_ids": sorted(item["id"] for item in query_result["relations"]),
+            "input_evidence_manifest_ids": sorted(
+                item["id"] for item in query_result["evidence_manifests"]
+            ),
+        }
+
     def _validate_temporal_scope(self, observation: dict[str, Any]) -> None:
         self._validate_interval(observation, "observation validity")
 
@@ -640,6 +865,12 @@ class ReadinProjection:
         cartographic_query_plans.sort(
             key=lambda item: (item["ledger_recorded_at"], item["plan"]["id"])
         )
+        multi_fitter_runs = [
+            self.multi_fitter_run_view(group_id)
+            for group_id, group in self._fitter_run_groups.items()
+            if group["asset_entity_id"] == entity_id
+        ]
+        multi_fitter_runs.sort(key=lambda item: (item["recorded_at"], item["run_group_id"]))
         claim_ids = {item["claim"]["id"] for item in claims}
         links = [
             deepcopy(link) for link in self.evidence_links.values() if link["claim_id"] in claim_ids
@@ -666,6 +897,7 @@ class ReadinProjection:
             "relations": relations,
             "resolution_candidates": resolution_candidates,
             "cartographic_query_plans": cartographic_query_plans,
+            "multi_fitter_runs": multi_fitter_runs,
             "evidence_dependencies": dependencies,
             "observer_frames": [deepcopy(self.frames[item]) for item in frame_ids],
             "evidence_manifests": [deepcopy(self.evidence[item]) for item in artifact_ids],
@@ -931,6 +1163,103 @@ class ReadinProjection:
                     changed = True
         return dependency_ids, artifact_ids
 
+    def fitter_view(self, fitter_id: str) -> dict[str, Any]:
+        if fitter_id not in self.fitters:
+            raise ProjectionError(f"unknown fitter: {fitter_id}")
+        runs = [
+            self.fitter_run_view(run_id)
+            for run_id, run in self.fitter_runs.items()
+            if run["fitter_id"] == fitter_id
+        ]
+        runs.sort(key=lambda item: (item["run"]["recorded_at"], item["run"]["id"]))
+        return {
+            "descriptor": deepcopy(self.fitters[fitter_id]),
+            "ledger_recorded_at": self._fitter_recorded_at[fitter_id],
+            "runs": runs,
+            "empirical_validity_state": "NOT_ESTABLISHED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def fitter_run_view(self, run_id: str) -> dict[str, Any]:
+        if run_id not in self.fitter_runs:
+            raise ProjectionError(f"unknown fitter run: {run_id}")
+        run = deepcopy(self.fitter_runs[run_id])
+        return {
+            "run": run,
+            "descriptor": deepcopy(self.fitters[run["fitter_id"]]),
+            "prediction_state": "NOT_REQUESTED",
+            "residual_readback_state": "NOT_PERFORMED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def multi_fitter_run_view(self, run_group_id: str) -> dict[str, Any]:
+        if run_group_id not in self._fitter_run_groups:
+            raise ProjectionError(f"unknown multi-fitter run group: {run_group_id}")
+        group = deepcopy(self._fitter_run_groups[run_group_id])
+        runs = [
+            self.fitter_run_view(run_id)
+            for run_id, run in self.fitter_runs.items()
+            if run["run_group_id"] == run_group_id
+        ]
+        runs.sort(
+            key=lambda item: (
+                item["descriptor"]["fitter_class"],
+                item["run"]["fitter_id"],
+            )
+        )
+        fit_results = [item["run"]["fit_result"] for item in runs if item["run"]["fit_result"]]
+        outcomes = [item["run"]["outcome"] for item in runs]
+        completed_fitter_ids = sorted(item["run"]["fitter_id"] for item in runs)
+        requested_fitter_ids = group["requested_fitter_ids"]
+        missing_fitter_ids = sorted(set(requested_fitter_ids) - set(completed_fitter_ids))
+        target_metrics = sorted({item["target_metric"] for item in fit_results})
+        signals: list[str] = []
+        if "INVALID" in outcomes:
+            signals.append("MODEL_INVALIDITY_PRESENT")
+        if "ABSTAINED" in outcomes:
+            signals.append("ABSTENTION_PRESENT")
+        if len(target_metrics) > 1:
+            signals.append("OUTPUTS_INCOMMENSURATE")
+        if not fit_results:
+            signals.append("NO_ADMISSIBLE_RESULT")
+        if not signals:
+            signals.append("COMPARABLE_RESULTS_RETAINED")
+        return {
+            "run_group_id": run_group_id,
+            "query_plan_id": group["query_plan_id"],
+            "asset_entity_id": group["asset_entity_id"],
+            "asset_state_version": group["asset_state_version"],
+            "input_snapshot_sha256": group["input_snapshot_sha256"],
+            "requested_fitter_ids": requested_fitter_ids,
+            "completed_fitter_ids": completed_fitter_ids,
+            "missing_fitter_ids": missing_fitter_ids,
+            "completion_state": "PARTIAL" if missing_fitter_ids else "COMPLETE",
+            "recorded_at": min(item["run"]["recorded_at"] for item in runs),
+            "runs": runs,
+            "outcome_counts": {
+                "FIT": outcomes.count("FIT"),
+                "ABSTAINED": outcomes.count("ABSTAINED"),
+                "INVALID": outcomes.count("INVALID"),
+            },
+            "disagreement": {
+                "primary_status": signals[0],
+                "signals": signals,
+                "target_metrics": target_metrics,
+                "comparison_state": (
+                    "NOT_COMPARABLE" if len(target_metrics) > 1 else "BOUNDED_COMPARISON_ONLY"
+                ),
+            },
+            "consensus": {
+                "state": "NOT_COMPUTED",
+                "averaging_performed": False,
+                "privileged_fitter_id": None,
+            },
+            "empirical_validity_state": "NOT_ESTABLISHED",
+            "prediction_state": "NOT_REQUESTED",
+            "residual_readback_state": "NOT_PERFORMED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
     def resolution_candidate_view(self, candidate_id: str) -> dict[str, Any]:
         if candidate_id not in self.resolution_candidates:
             raise ProjectionError(f"unknown resolution candidate: {candidate_id}")
@@ -1099,6 +1428,11 @@ class ReadinProjection:
                 for plan in self.cartographic_query_plans.values()
                 if surface_id in plan["surface_ids"]
             }
+        if event_type == "fitter.run_completed":
+            query_id = payload["fitter_run"]["query_plan_id"]
+            if query_id not in self.cartographic_query_plans:
+                return set()
+            return {self.cartographic_query_plans[query_id]["asset_entity_id"]}
         if event_type == "evidence.linked":
             claim_id = payload["evidence_link"]["claim_id"]
             return {self.claims[claim_id]["subject"]} if claim_id in self.claims else set()
@@ -1131,6 +1465,10 @@ class ReadinProjection:
             return event["payload"]["cartographic_surface"]["registered_at"]
         if event_type == "cartography.query_planned":
             return event["payload"]["cartographic_query_plan"]["created_at"]
+        if event_type == "fitter.registered":
+            return event["payload"]["fitter_descriptor"]["registered_at"]
+        if event_type == "fitter.run_completed":
+            return event["payload"]["fitter_run"]["recorded_at"]
         return event["occurred_at"]
 
     def _parse_timestamp(self, value: str) -> datetime:
@@ -1157,6 +1495,15 @@ class ReadinProjection:
                 "cartographic_query_plan_count": sum(
                     entity_id == plan["asset_entity_id"]
                     for plan in self.cartographic_query_plans.values()
+                ),
+                "multi_fitter_run_group_count": sum(
+                    entity_id == group["asset_entity_id"]
+                    for group in self._fitter_run_groups.values()
+                ),
+                "fit_result_count": sum(
+                    entity_id
+                    == self.cartographic_query_plans[result["query_plan_id"]]["asset_entity_id"]
+                    for result in self.fit_results.values()
                 ),
                 "authority_state": "NO_AUTHORITY",
             }
