@@ -6,7 +6,7 @@ import pytest
 
 from readin.contracts import ContractViolation, validate_event
 from readin.events import create_entity_created
-from readin.synthetic import phase0_events, phase1_events, phase2_events
+from readin.synthetic import phase0_events, phase1_events, phase2_events, phase3_events
 
 
 def test_synthetic_phase0_events_conform() -> None:
@@ -45,6 +45,21 @@ def test_resolution_candidate_contract_rejects_merge_promotion() -> None:
     event["payload"]["resolution_candidate"]["merge_state"] = "MERGED"
     with pytest.raises(ContractViolation, match="NOT_MERGED"):
         validate_event(event)
+
+
+def test_synthetic_phase3_events_conform_without_execution_authority() -> None:
+    events = phase3_events()
+    assert len(events) == 25
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    surface = events[23]["payload"]["cartographic_surface"]
+    query = events[24]["payload"]["cartographic_query_plan"]
+    assert surface["coverage_state"] == "NOT_ESTABLISHED"
+    assert query["direction"] == "BACKWARD"
+    assert query["prediction_state"] == "NOT_REQUESTED"
+    assert query["execution_state"] == "PLANNED_READ_ONLY"
 
 
 def test_closed_event_rejects_unknown_field() -> None:

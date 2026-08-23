@@ -7,6 +7,8 @@ import json
 from typing import Any
 
 from readin.events import (
+    create_cartographic_query_planned,
+    create_cartographic_surface_registered,
     create_claim_created,
     create_entity_created,
     create_evidence_dependency_declared,
@@ -334,6 +336,93 @@ def phase2_events() -> list[dict[str, Any]]:
                 assessment_id="28282828-2828-4282-8282-282828282828",
                 event_id="31313131-3131-4313-8313-313131313131",
                 occurred_at="2026-08-21T12:00:19Z",
+            ),
+        ]
+    )
+    return events
+
+
+def phase3_events() -> list[dict[str, Any]]:
+    """Return a bounded backward cartographic plan over two distinguishable frames."""
+
+    events = phase2_events()
+    entity_id = "11111111-1111-4111-8111-111111111111"
+    public_record_frame_id = "22222222-2222-4222-8222-222222222222"
+    analyst_frame_id = "32323232-3232-4323-8323-323232323232"
+    analyst_artifact_id = "34343434-3434-4343-8343-343434343434"
+    analyst_observation_id = "35353535-3535-4353-8353-353535353535"
+    surface_id = "37373737-3737-4373-8373-373737373737"
+    query_id = "39393939-3939-4393-8393-393939393939"
+    analyst_payload = {
+        "note": "Synthetic analyst interpretation outside the public-record surface",
+        "disposition": "fixture_only",
+    }
+    analyst_bytes = json.dumps(
+        analyst_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    analyst_uri = "urn:readin:synthetic:analyst-note-001"
+
+    events.extend(
+        [
+            create_observer_frame_registered(
+                "Synthetic analyst note",
+                "analyst_note",
+                access_description="Closed synthetic analyst-note fixture",
+                interpretation_name="bounded_analyst_interpretation",
+                interpretation_description=(
+                    "A fixture-only interpretation that is not promoted to a fact"
+                ),
+                known_blind_regions=["Single-observer interpretation"],
+                validity_conditions=["Valid only for the bundled synthetic fixture"],
+                frame_id=analyst_frame_id,
+                event_id="36363636-3636-4363-8363-363636363631",
+                occurred_at="2026-08-21T12:00:20Z",
+            ),
+            create_evidence_manifested(
+                hashlib.sha256(analyst_bytes).hexdigest(),
+                "application/json",
+                len(analyst_bytes),
+                "Bundled synthetic analyst note",
+                source_uri=analyst_uri,
+                license_name="Apache-2.0",
+                artifact_id=analyst_artifact_id,
+                event_id="36363636-3636-4363-8363-363636363632",
+                occurred_at="2026-08-21T12:00:21Z",
+            ),
+            create_observation_admitted(
+                [entity_id],
+                analyst_frame_id,
+                analyst_artifact_id,
+                "analyst_note.interpretation",
+                analyst_payload,
+                "2026-08-21T12:00:20Z",
+                source_uri=analyst_uri,
+                uncertainty={"disposition": "NOT_EVALUATED"},
+                observation_id=analyst_observation_id,
+                event_id="36363636-3636-4363-8363-363636363633",
+                occurred_at="2026-08-21T12:00:22Z",
+            ),
+            create_cartographic_surface_registered(
+                "Synthetic public-record surface",
+                "The bundled public-record observer frame only",
+                [public_record_frame_id],
+                blind_region_state="DECLARED",
+                blind_regions=["No independent operational verification"],
+                validity_conditions=["Closed synthetic ledger only"],
+                surface_id=surface_id,
+                event_id="36363636-3636-4363-8363-363636363634",
+                occurred_at="2026-08-21T12:00:23Z",
+            ),
+            create_cartographic_query_planned(
+                entity_id,
+                [surface_id],
+                reconstruction_mode="AS_KNOWN_THEN",
+                epistemic_cutoff="2026-08-21T12:00:22Z",
+                max_relation_hops=1,
+                include_relations=True,
+                query_id=query_id,
+                event_id="36363636-3636-4363-8363-363636363635",
+                occurred_at="2026-08-21T12:00:24Z",
             ),
         ]
     )

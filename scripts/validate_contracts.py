@@ -1,4 +1,4 @@
-"""Validate the schema, Phase 2 loop, and fail-closed negative vectors."""
+"""Validate the schema, Phase 3 loop, and fail-closed negative vectors."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from jsonschema import Draft202012Validator
 
 from readin.contracts import ContractViolation, load_event_schema, validate_event
 from readin.projection import ProjectionError, ReadinProjection
-from readin.synthetic import phase2_events
+from readin.synthetic import phase3_events
 
 
 def _must_reject_contract(event: dict[str, object]) -> None:
@@ -22,7 +22,7 @@ def _must_reject_contract(event: dict[str, object]) -> None:
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
-    events = phase2_events()
+    events = phase3_events()
     for event in events:
         validate_event(event)
     projection = ReadinProjection.replay(events)
@@ -101,11 +101,39 @@ def main() -> None:
     else:
         raise AssertionError("assessment of an unknown candidate was accepted")
 
+    invalid_surface = deepcopy(events[23])
+    invalid_surface["payload"]["cartographic_surface"]["blind_regions"] = []
+    try:
+        ReadinProjection.replay([*events[:23], invalid_surface])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("incoherent cartographic blind-region state was accepted")
+
+    invalid_query = deepcopy(events[24])
+    invalid_query["payload"]["cartographic_query_plan"]["surface_ids"] = [
+        "50505050-5050-4505-8505-505050505050"
+    ]
+    try:
+        ReadinProjection.replay([*events[:23], invalid_query])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("query with unknown cartographic surface was accepted")
+
+    query_result = projection.execute_cartographic_query("39393939-3939-4393-8393-393939393939")
+    if query_result["authority_state"] != "NO_AUTHORITY":
+        raise AssertionError("cartographic query acquired action authority")
+    if query_result["aperture"]["coverage_state"] != "NOT_ESTABLISHED":
+        raise AssertionError("cartographic query promoted bounded aperture to coverage")
+
     print(
         f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=3 "
-        f"negative_semantic_vectors=6 tracked_assets={len(projection.assets)} "
+        f"negative_semantic_vectors=8 tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
-        f"resolution_candidates={len(projection.resolution_candidates)}"
+        f"resolution_candidates={len(projection.resolution_candidates)} "
+        f"cartographic_surfaces={len(projection.cartographic_surfaces)} "
+        f"cartographic_query_plans={len(projection.cartographic_query_plans)}"
     )
 
 

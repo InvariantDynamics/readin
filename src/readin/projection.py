@@ -1,4 +1,4 @@
-"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 2 ledger."""
+"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 3 ledger."""
 
 from __future__ import annotations
 
@@ -28,6 +28,8 @@ class ReadinProjection:
         self.relations: dict[str, dict[str, Any]] = {}
         self.resolution_candidates: dict[str, dict[str, Any]] = {}
         self.resolution_assessments: dict[str, dict[str, Any]] = {}
+        self.cartographic_surfaces: dict[str, dict[str, Any]] = {}
+        self.cartographic_query_plans: dict[str, dict[str, Any]] = {}
         self.asset_versions: dict[str, list[dict[str, Any]]] = {}
         self.event_ids: set[str] = set()
         self._evidence_digests: dict[str, str] = {}
@@ -35,6 +37,8 @@ class ReadinProjection:
         self._dependency_graph: dict[str, set[str]] = {}
         self._candidate_pairs: dict[tuple[str, str], str] = {}
         self._latest_resolution_assessment: dict[str, str] = {}
+        self._cartographic_surface_recorded_at: dict[str, str] = {}
+        self._cartographic_query_recorded_at: dict[str, str] = {}
         self._events: list[dict[str, Any]] = []
 
     @classmethod
@@ -372,6 +376,59 @@ class ReadinProjection:
         }.intersection(self.assets):
             self._advance_asset(entity_id, event)
 
+    def _apply_cartography_surface_registered(self, event: dict[str, Any]) -> None:
+        surface = deepcopy(event["payload"]["cartographic_surface"])
+        surface_id = surface["id"]
+        if surface_id in self.cartographic_surfaces:
+            raise ProjectionError(f"duplicate cartographic surface id: {surface_id}")
+
+        unknown_frames = sorted(set(surface["observer_frame_ids"]) - self.frames.keys())
+        if unknown_frames:
+            raise ProjectionError(
+                f"cartographic surface references unknown observer frames: {unknown_frames}"
+            )
+        if surface["blind_region_state"] == "DECLARED" and not surface["blind_regions"]:
+            raise ProjectionError("DECLARED surface requires at least one blind region")
+        if surface["blind_region_state"] == "NOT_CHARACTERIZED" and surface["blind_regions"]:
+            raise ProjectionError("NOT_CHARACTERIZED surface cannot declare blind regions")
+
+        self.cartographic_surfaces[surface_id] = surface
+        self._cartographic_surface_recorded_at[surface_id] = event["occurred_at"]
+
+    def _apply_cartography_query_planned(self, event: dict[str, Any]) -> None:
+        plan = deepcopy(event["payload"]["cartographic_query_plan"])
+        query_id = plan["id"]
+        if query_id in self.cartographic_query_plans:
+            raise ProjectionError(f"duplicate cartographic query plan id: {query_id}")
+
+        asset_id = plan["asset_entity_id"]
+        if asset_id not in self.assets:
+            raise ProjectionError(
+                f"cartographic query references unknown tracked asset: {asset_id}"
+            )
+        unknown_surfaces = sorted(set(plan["surface_ids"]) - self.cartographic_surfaces.keys())
+        if unknown_surfaces:
+            raise ProjectionError(
+                f"cartographic query references unknown surfaces: {unknown_surfaces}"
+            )
+
+        traversal = plan["traversal"]
+        if traversal["include_relations"] and traversal["max_relation_hops"] == 0:
+            raise ProjectionError("relation traversal requires at least one relation hop")
+        if not traversal["include_relations"] and traversal["max_relation_hops"] != 0:
+            raise ProjectionError("disabled relation traversal requires zero relation hops")
+
+        reconstruction = plan["reconstruction"]
+        cutoff = reconstruction["epistemic_cutoff"]
+        if reconstruction["mode"] == "AS_KNOWN_THEN" and cutoff is not None:
+            tracked_at = self.asset_versions[asset_id][0]["recorded_at"]
+            if self._parse_timestamp(cutoff) < self._parse_timestamp(tracked_at):
+                raise ProjectionError("cartographic cutoff precedes asset tracking")
+
+        self.cartographic_query_plans[query_id] = plan
+        self._cartographic_query_recorded_at[query_id] = event["occurred_at"]
+        self._advance_asset(asset_id, event)
+
     def _validate_temporal_scope(self, observation: dict[str, Any]) -> None:
         self._validate_interval(observation, "observation validity")
 
@@ -575,6 +632,14 @@ class ReadinProjection:
                 item["candidate"]["id"],
             )
         )
+        cartographic_query_plans = [
+            self.cartographic_query_plan_view(query_id)
+            for query_id, plan in self.cartographic_query_plans.items()
+            if plan["asset_entity_id"] == entity_id
+        ]
+        cartographic_query_plans.sort(
+            key=lambda item: (item["ledger_recorded_at"], item["plan"]["id"])
+        )
         claim_ids = {item["claim"]["id"] for item in claims}
         links = [
             deepcopy(link) for link in self.evidence_links.values() if link["claim_id"] in claim_ids
@@ -600,12 +665,271 @@ class ReadinProjection:
             "claims": claims,
             "relations": relations,
             "resolution_candidates": resolution_candidates,
+            "cartographic_query_plans": cartographic_query_plans,
             "evidence_dependencies": dependencies,
             "observer_frames": [deepcopy(self.frames[item]) for item in frame_ids],
             "evidence_manifests": [deepcopy(self.evidence[item]) for item in artifact_ids],
             "state_history": deepcopy(self.asset_versions[entity_id]),
             "authority_state": "NO_AUTHORITY",
         }
+
+    def cartographic_surface_view(self, surface_id: str) -> dict[str, Any]:
+        if surface_id not in self.cartographic_surfaces:
+            raise ProjectionError(f"unknown cartographic surface: {surface_id}")
+        surface = deepcopy(self.cartographic_surfaces[surface_id])
+        return {
+            "surface": surface,
+            "ledger_recorded_at": self._cartographic_surface_recorded_at[surface_id],
+            "observer_frames": [
+                deepcopy(self.frames[frame_id]) for frame_id in surface["observer_frame_ids"]
+            ],
+            "coverage_state": "NOT_ESTABLISHED",
+            "completeness_claim": "NOT_MADE",
+            "validity_evaluation_state": "NOT_EVALUATED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def cartographic_query_plan_view(self, query_id: str) -> dict[str, Any]:
+        if query_id not in self.cartographic_query_plans:
+            raise ProjectionError(f"unknown cartographic query plan: {query_id}")
+        plan = deepcopy(self.cartographic_query_plans[query_id])
+        cutoff_value = plan["reconstruction"]["epistemic_cutoff"]
+        cutoff = self._parse_timestamp(cutoff_value) if cutoff_value else None
+        surface_ids_recorded_after_cutoff = sorted(
+            surface_id
+            for surface_id in plan["surface_ids"]
+            if cutoff
+            and self._parse_timestamp(self._cartographic_surface_recorded_at[surface_id]) > cutoff
+        )
+        plan_recorded_after_cutoff = bool(
+            cutoff
+            and self._parse_timestamp(self._cartographic_query_recorded_at[query_id]) > cutoff
+        )
+        return {
+            "plan": plan,
+            "ledger_recorded_at": self._cartographic_query_recorded_at[query_id],
+            "surfaces": [
+                self.cartographic_surface_view(surface_id) for surface_id in plan["surface_ids"]
+            ],
+            "query_lens": {
+                "hindsight_basis": "LEDGER_RECORDED_AT",
+                "plan_recorded_after_cutoff": plan_recorded_after_cutoff,
+                "surface_ids_recorded_after_cutoff": surface_ids_recorded_after_cutoff,
+                "hindsight_in_query_lens": bool(
+                    plan_recorded_after_cutoff or surface_ids_recorded_after_cutoff
+                ),
+            },
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def execute_cartographic_query(self, query_id: str) -> dict[str, Any]:
+        """Execute a persisted backward plan against only the local immutable ledger."""
+
+        plan_view = self.cartographic_query_plan_view(query_id)
+        plan = plan_view["plan"]
+        reconstruction = plan["reconstruction"]
+        cutoff_value = reconstruction["epistemic_cutoff"]
+        data_projection = self
+        if reconstruction["mode"] == "AS_KNOWN_THEN" and cutoff_value is not None:
+            cutoff = self._parse_timestamp(cutoff_value)
+            bounded_events = [
+                event
+                for event in self._events
+                if self._parse_timestamp(event["occurred_at"]) <= cutoff
+            ]
+            data_projection = ReadinProjection.replay(bounded_events)
+
+        result = data_projection._execute_cartographic_plan(
+            plan,
+            [self.cartographic_surfaces[item] for item in plan["surface_ids"]],
+            {
+                frame_id: self.frames[frame_id]
+                for surface_id in plan["surface_ids"]
+                for frame_id in self.cartographic_surfaces[surface_id]["observer_frame_ids"]
+            },
+        )
+        result["query_plan_ledger_recorded_at"] = plan_view["ledger_recorded_at"]
+        result["cartographic_surfaces"] = plan_view["surfaces"]
+        result["query_lens"] = plan_view["query_lens"]
+        return result
+
+    def _execute_cartographic_plan(
+        self,
+        plan: dict[str, Any],
+        surfaces: list[dict[str, Any]],
+        lens_frames: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        asset_id = plan["asset_entity_id"]
+        if asset_id not in self.assets:
+            raise ProjectionError(
+                "cartographic asset is absent from the selected epistemic reconstruction"
+            )
+
+        selected_frame_ids = {
+            frame_id for surface in surfaces for frame_id in surface["observer_frame_ids"]
+        }
+        traversal = plan["traversal"]
+        visited_entities = {asset_id}
+        frontier = {asset_id}
+        included_relation_ids: set[str] = set()
+
+        for _ in range(traversal["max_relation_hops"]):
+            selected_observation_ids = {
+                observation_id
+                for observation_id, observation in self.observations.items()
+                if observation["observer_frame_id"] in selected_frame_ids
+                and visited_entities.intersection(observation["subject_entities"])
+            }
+            selected_claim_ids = {
+                claim_id
+                for claim_id, claim in self.claims.items()
+                if claim["subject"] in visited_entities
+                and selected_observation_ids.intersection(claim["derived_from"])
+            }
+            traversed_relations = {
+                relation_id
+                for relation_id, relation in self.relations.items()
+                if relation["source_entity"] in frontier
+                and selected_claim_ids.intersection(relation["claims"])
+            }
+            included_relation_ids.update(traversed_relations)
+            next_entities = {
+                self.relations[relation_id]["target_entity"] for relation_id in traversed_relations
+            } - visited_entities
+            if not next_entities:
+                break
+            visited_entities.update(next_entities)
+            frontier = next_entities
+
+        selected_observation_ids = {
+            observation_id
+            for observation_id, observation in self.observations.items()
+            if observation["observer_frame_id"] in selected_frame_ids
+            and visited_entities.intersection(observation["subject_entities"])
+        }
+        selected_claim_ids = {
+            claim_id
+            for claim_id, claim in self.claims.items()
+            if claim["subject"] in visited_entities
+            and selected_observation_ids.intersection(claim["derived_from"])
+        }
+        selected_artifact_ids = {
+            self.observations[observation_id]["source_artifact_id"]
+            for observation_id in selected_observation_ids
+        }
+
+        claims: list[dict[str, Any]] = []
+        linked_artifact_ids: set[str] = set()
+        for claim_id in sorted(selected_claim_ids):
+            claim_view = self.claim_view(claim_id)
+            claim = claim_view["claim"]
+            claim_view["surface_matched_observation_ids"] = sorted(
+                selected_observation_ids.intersection(claim["derived_from"])
+            )
+            claim_view["outside_surface_derivation_observation_ids"] = sorted(
+                set(claim["derived_from"]) - selected_observation_ids
+            )
+            claim_view["off_surface_evidence_link_ids"] = sorted(
+                link["id"]
+                for link in claim_view["evidence_links"]
+                if link["evidence_id"] not in selected_artifact_ids
+            )
+            linked_artifact_ids.update(link["evidence_id"] for link in claim_view["evidence_links"])
+            claims.append(claim_view)
+
+        dependency_ids, dependency_artifact_ids = self._evidence_dependency_closure(
+            selected_artifact_ids | linked_artifact_ids
+        )
+        known_blind_regions = sorted(
+            {blind_region for surface in surfaces for blind_region in surface["blind_regions"]}
+            | {
+                blind_region
+                for frame_id in selected_frame_ids
+                for blind_region in lens_frames[frame_id]["known_blind_regions"]
+            }
+        )
+        excluded_asset_observations = [
+            observation_id
+            for observation_id, observation in self.observations.items()
+            if asset_id in observation["subject_entities"]
+            and observation["observer_frame_id"] not in selected_frame_ids
+        ]
+
+        observations = [
+            deepcopy(self.observations[item]) for item in sorted(selected_observation_ids)
+        ]
+        relations = [deepcopy(self.relations[item]) for item in sorted(included_relation_ids)]
+        return {
+            "query_plan": deepcopy(plan),
+            "data_reconstruction": deepcopy(plan["reconstruction"]),
+            "execution": {
+                "state": "LOCAL_LEDGER_REPLAY",
+                "read_only": True,
+                "network_access": False,
+                "prediction_state": "NOT_REQUESTED",
+            },
+            "aperture": {
+                "selected_surface_count": len(surfaces),
+                "selected_observer_frame_count": len(selected_frame_ids),
+                "visited_entity_count": len(visited_entities),
+                "included_observation_count": len(observations),
+                "excluded_asset_observation_count": len(excluded_asset_observations),
+                "excluded_asset_observation_ids": sorted(excluded_asset_observations),
+                "coverage_state": "NOT_ESTABLISHED",
+                "completeness_claim": "NOT_MADE",
+            },
+            "blind_regions": {
+                "known": known_blind_regions,
+                "uncharacterized_surface_ids": sorted(
+                    surface["id"]
+                    for surface in surfaces
+                    if surface["blind_region_state"] == "NOT_CHARACTERIZED"
+                ),
+            },
+            "entities": [deepcopy(self.entities[item]) for item in sorted(visited_entities)],
+            "lens_observer_frames": [
+                deepcopy(lens_frames[item]) for item in sorted(selected_frame_ids)
+            ],
+            "data_observer_frame_ids": sorted(selected_frame_ids.intersection(self.frames)),
+            "observations": observations,
+            "claims": claims,
+            "relations": relations,
+            "evidence_manifests": [
+                deepcopy(self.evidence[item]) for item in sorted(dependency_artifact_ids)
+            ],
+            "surface_evidence_manifest_ids": sorted(selected_artifact_ids),
+            "linked_or_dependency_evidence_manifest_ids": sorted(
+                dependency_artifact_ids - selected_artifact_ids
+            ),
+            "evidence_dependencies": [
+                deepcopy(self.dependencies[item]) for item in sorted(dependency_ids)
+            ],
+            "missingness_policy": "PRESERVE",
+            "conflict_policy": "PRESERVE",
+            "surface_validity_evaluation_state": "NOT_EVALUATED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def _evidence_dependency_closure(
+        self, seed_artifact_ids: set[str]
+    ) -> tuple[set[str], set[str]]:
+        artifact_ids = set(seed_artifact_ids)
+        dependency_ids: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for dependency_id, dependency in self.dependencies.items():
+                endpoints = {
+                    dependency["ancestor_evidence_id"],
+                    dependency["descendant_evidence_id"],
+                }
+                if artifact_ids.intersection(endpoints) and (
+                    dependency_id not in dependency_ids or not endpoints <= artifact_ids
+                ):
+                    dependency_ids.add(dependency_id)
+                    artifact_ids.update(endpoints)
+                    changed = True
+        return dependency_ids, artifact_ids
 
     def resolution_candidate_view(self, candidate_id: str) -> dict[str, Any]:
         if candidate_id not in self.resolution_candidates:
@@ -766,6 +1090,15 @@ class ReadinProjection:
                 return set()
             candidate = self.resolution_candidates[candidate_id]
             return {candidate["left_entity_id"], candidate["right_entity_id"]}
+        if event_type == "cartography.query_planned":
+            return {payload["cartographic_query_plan"]["asset_entity_id"]}
+        if event_type == "cartography.surface_registered":
+            surface_id = payload["cartographic_surface"]["id"]
+            return {
+                plan["asset_entity_id"]
+                for plan in self.cartographic_query_plans.values()
+                if surface_id in plan["surface_ids"]
+            }
         if event_type == "evidence.linked":
             claim_id = payload["evidence_link"]["claim_id"]
             return {self.claims[claim_id]["subject"]} if claim_id in self.claims else set()
@@ -794,6 +1127,10 @@ class ReadinProjection:
             return event["payload"]["resolution_candidate"]["recorded_at"]
         if event_type == "entity.resolution_candidate_assessed":
             return event["payload"]["resolution_assessment"]["assessed_at"]
+        if event_type == "cartography.surface_registered":
+            return event["payload"]["cartographic_surface"]["registered_at"]
+        if event_type == "cartography.query_planned":
+            return event["payload"]["cartographic_query_plan"]["created_at"]
         return event["occurred_at"]
 
     def _parse_timestamp(self, value: str) -> datetime:
@@ -816,6 +1153,10 @@ class ReadinProjection:
                 "resolution_candidate_count": sum(
                     entity_id in {candidate["left_entity_id"], candidate["right_entity_id"]}
                     for candidate in self.resolution_candidates.values()
+                ),
+                "cartographic_query_plan_count": sum(
+                    entity_id == plan["asset_entity_id"]
+                    for plan in self.cartographic_query_plans.values()
                 ),
                 "authority_state": "NO_AUTHORITY",
             }

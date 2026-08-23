@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 through Phase 2 runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 3 runtime."""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from typing import Any
 
 from readin.contracts import ContractViolation
 from readin.events import (
+    create_cartographic_query_planned,
+    create_cartographic_surface_registered,
     create_claim_created,
     create_entity_created,
     create_evidence_dependency_declared,
@@ -282,6 +284,36 @@ def _build_parser() -> argparse.ArgumentParser:
     assessment_parser.add_argument("--supersedes")
     assessment_parser.add_argument("--assessment-id")
 
+    surface_parser = subparsers.add_parser(
+        "register-cartographic-surface",
+        help="Register an observer-frame surface with explicit blind-region state",
+    )
+    _add_ledger_argument(surface_parser)
+    surface_parser.add_argument("--name", required=True)
+    surface_parser.add_argument("--description", required=True)
+    surface_parser.add_argument("--frame", required=True, action="append")
+    surface_parser.add_argument(
+        "--blind-region-state",
+        choices=("DECLARED", "NOT_CHARACTERIZED"),
+        default="NOT_CHARACTERIZED",
+    )
+    surface_parser.add_argument("--blind-region", action="append", default=[])
+    surface_parser.add_argument("--validity-condition", action="append", default=[])
+    surface_parser.add_argument("--surface-id")
+
+    query_parser = subparsers.add_parser(
+        "plan-cartographic-query",
+        help="Persist a read-only backward local-ledger query plan",
+    )
+    _add_ledger_argument(query_parser)
+    query_parser.add_argument("--asset", required=True)
+    query_parser.add_argument("--surface", required=True, action="append")
+    query_parser.add_argument("--mode", choices=RECONSTRUCTION_MODES, default="AS_KNOWN_THEN")
+    query_parser.add_argument("--epistemic-cutoff")
+    query_parser.add_argument("--max-relation-hops", type=int)
+    query_parser.add_argument("--no-relations", action="store_true")
+    query_parser.add_argument("--query-id")
+
     show_parser = subparsers.add_parser("show-asset", help="Replay and inspect one tracked asset")
     _add_ledger_argument(show_parser)
     show_parser.add_argument("--asset", required=True)
@@ -302,6 +334,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_ledger_argument(candidate_view_parser)
     candidate_view_parser.add_argument("--candidate", required=True)
+
+    surface_view_parser = subparsers.add_parser(
+        "show-cartographic-surface", help="Inspect one registered cartographic surface"
+    )
+    _add_ledger_argument(surface_view_parser)
+    surface_view_parser.add_argument("--surface", required=True)
+
+    query_view_parser = subparsers.add_parser(
+        "show-cartographic-query", help="Inspect one persisted cartographic query plan"
+    )
+    _add_ledger_argument(query_view_parser)
+    query_view_parser.add_argument("--query", required=True)
+
+    run_query_parser = subparsers.add_parser(
+        "run-cartographic-query",
+        help="Execute one plan deterministically against the local ledger",
+    )
+    _add_ledger_argument(run_query_parser)
+    run_query_parser.add_argument("--query", required=True)
 
     list_parser = subparsers.add_parser("list-assets", help="Replay and list the tracked catalog")
     _add_ledger_argument(list_parser)
@@ -482,6 +533,35 @@ def _run(args: argparse.Namespace) -> Any:
         ledger.append(event)
         return event
 
+    if args.command == "register-cartographic-surface":
+        event = create_cartographic_surface_registered(
+            args.name,
+            args.description,
+            args.frame,
+            blind_region_state=args.blind_region_state,
+            blind_regions=args.blind_region,
+            validity_conditions=args.validity_condition,
+            surface_id=args.surface_id,
+        )
+        ledger.append(event)
+        return event
+
+    if args.command == "plan-cartographic-query":
+        max_relation_hops = args.max_relation_hops
+        if max_relation_hops is None:
+            max_relation_hops = 0 if args.no_relations else 1
+        event = create_cartographic_query_planned(
+            args.asset,
+            args.surface,
+            reconstruction_mode=args.mode,
+            epistemic_cutoff=args.epistemic_cutoff,
+            max_relation_hops=max_relation_hops,
+            include_relations=not args.no_relations,
+            query_id=args.query_id,
+        )
+        ledger.append(event)
+        return event
+
     projection = ledger.projection()
     if args.command == "show-asset":
         return projection.asset_view_at(
@@ -497,6 +577,12 @@ def _run(args: argparse.Namespace) -> Any:
         )
     if args.command == "show-resolution-candidate":
         return projection.resolution_candidate_view(args.candidate)
+    if args.command == "show-cartographic-surface":
+        return projection.cartographic_surface_view(args.surface)
+    if args.command == "show-cartographic-query":
+        return projection.cartographic_query_plan_view(args.query)
+    if args.command == "run-cartographic-query":
+        return projection.execute_cartographic_query(args.query)
     if args.command == "list-assets":
         return projection.catalog_view()
     raise AssertionError(f"unhandled command: {args.command}")

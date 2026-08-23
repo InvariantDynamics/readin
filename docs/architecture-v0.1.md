@@ -18,9 +18,9 @@ E_e(t) = (observations, claims, relations, hypotheses, beliefs,
 
 The current implementation opens the entity, tracking, frame, evidence-manifest, observation,
 dependency, claim, evidence-link, relation, historical reconstruction, and reversible candidate
-resolution layers. These layers remain separate: an observation is never silently promoted into a
-claim or belief, and linked
-evidence never resolves a claim by itself.
+resolution layers, plus a bounded cartographic surface and backward-query layer. These layers remain
+separate: an observation is never silently promoted into a claim or belief, linked evidence never
+resolves a claim by itself, and a selected surface never becomes a completeness claim.
 
 ## Ownership boundary
 
@@ -32,7 +32,7 @@ evidence never resolves a claim by itself.
 
 ## Current event model
 
-The ledger supports eleven events:
+The ledger supports thirteen events:
 
 - `entity.created`
 - `asset.tracking_started`
@@ -45,6 +45,8 @@ The ledger supports eleven events:
 - `relation.created`
 - `entity.resolution_candidate_recorded`
 - `entity.resolution_candidate_assessed`
+- `cartography.surface_registered`
+- `cartography.query_planned`
 
 Every event is append-only, schema-validated, timestamped, uniquely identified, and marked
 `NO_AUTHORITY`. Projection fails closed when an asset or frame is unknown, an identifier is reused,
@@ -64,6 +66,13 @@ evidence.manifested --------------------------> evidence.linked+          |
 entity.created ---------------------------------> relation.created --> replay
                                                                          |
                                                            asset view + timeline
+
+observer_frame.registered --> cartography.surface_registered
+                                          |
+tracked asset ----------------------------+--> cartography.query_planned
+                                                     |
+                                                     v
+                                      read-only local-ledger traversal
 ```
 
 Candidate resolution is a sidecar to entity identity, not an entity mutation. A candidate records
@@ -72,6 +81,32 @@ linearly superseded history. `automatic_merge: false` and `merge_state: NOT_MERG
 constants even for `CONFIRMED_MATCH_NOT_MERGED`; no event in this slice can merge entities.
 Signal verification is a separate axis: asserted, reference-validated, or exact entity-record
 validated. A validated shared field supports candidacy only and never establishes identity.
+
+## Bounded cartography
+
+A cartographic surface is an explicitly named composite of one or more registered observer frames.
+Its blind-region state is either `DECLARED`, with at least one stated blind region, or
+`NOT_CHARACTERIZED`, with no implied knowledge of what is missing. Surface coverage is always
+`NOT_ESTABLISHED` in this slice.
+
+A cartographic query plan is persistent and backward-only. It binds one tracked asset to one or more
+surfaces, a reconstruction mode and optional epistemic cutoff, and a relation-traversal limit of zero
+to three hops. Observations, claims, evidence manifests, and dependency ancestry are always retained;
+relations may be disabled. Missingness and conflict policies are fixed to `PRESERVE`, prediction is
+`NOT_REQUESTED`, and execution is `PLANNED_READ_ONLY`.
+
+Execution deterministically traverses the already-admitted local ledger. An observation is selected
+only when its observer frame is on the chosen surface and it concerns a visited entity. A claim is
+included only when at least one of its derivation observations is selected. A relation can extend the
+traversal only when it originates at the current frontier and cites a selected claim. Evidence
+dependency closure remains visible so derivatives do not appear independent.
+
+For `AS_KNOWN_THEN`, the epistemic cutoff bounds ledger data. Surface and plan definitions form a
+separate query lens; when either was recorded to the ledger after the cutoff, the result marks that
+lens as hindsight using ledger-recorded time rather than a backdatable domain timestamp. Results
+report excluded asset observations, known and uncharacterized blind regions, `NOT_ESTABLISHED`
+coverage, unevaluated surface validity conditions, no completeness claim, no network access, and
+`NO_AUTHORITY`.
 
 Claims are created with `epistemic_status: unresolved`. An evidence link records role or polarity,
 dependency group, warrant, appraisal, and strength as separate axes. Strength is `UNASSESSED` until
@@ -118,10 +153,12 @@ artifact storage and live acquisition are later gated work.
    asset versions, and hindsight-labeled reconstruction. *(implemented)*
 3. **Phase 2 candidate resolution** — reversible entity candidates and manual assessments; no
    merge. *(implemented)*
-4. **Extended cartography** — surface traversal, explicit blind regions, and query planning.
-5. **Multi-fitter runtime** — bounded fitter inputs, receipts, residuals, validity, disagreement.
-6. **Scenario and belief engine** — conditional branches without destiny claims.
-7. **Asset workbench** — dense operator interface over the inspectable epistemic field.
+4. **Phase 3 bounded cartography** — observer-frame surfaces, explicit blind regions, persistent
+   backward query plans, and deterministic local traversal. *(implemented)*
+5. **Phase 4 multi-fitter runtime** — bounded fitter inputs, receipts, residuals, validity, and
+   disagreement.
+6. **Phase 5 scenario and belief engine** — conditional branches without destiny claims.
+7. **Phase 6 asset workbench** — dense operator interface over the inspectable epistemic field.
 
 Each slice requires its own contract, positive and negative fixtures, validation path, claim ceiling,
 and stop conditions.
