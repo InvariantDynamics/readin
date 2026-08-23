@@ -18,9 +18,10 @@ E_e(t) = (observations, claims, relations, hypotheses, beliefs,
 
 The current implementation opens the entity, tracking, frame, evidence-manifest, observation,
 dependency, claim, evidence-link, relation, historical reconstruction, and reversible candidate
-resolution layers, plus a bounded cartographic surface and backward-query layer. These layers remain
-separate: an observation is never silently promoted into a claim or belief, linked evidence never
-resolves a claim by itself, and a selected surface never becomes a completeness claim.
+resolution layers, plus bounded cartographic and multi-fitter layers. These layers remain separate:
+an observation is never silently promoted into a claim or belief, linked evidence never resolves a
+claim by itself, a selected surface never becomes a completeness claim, and a fitter result never
+becomes evidence or model authority.
 
 ## Ownership boundary
 
@@ -32,7 +33,7 @@ resolves a claim by itself, and a selected surface never becomes a completeness 
 
 ## Current event model
 
-The ledger supports thirteen events:
+The ledger supports fifteen events:
 
 - `entity.created`
 - `asset.tracking_started`
@@ -47,6 +48,8 @@ The ledger supports thirteen events:
 - `entity.resolution_candidate_assessed`
 - `cartography.surface_registered`
 - `cartography.query_planned`
+- `fitter.registered`
+- `fitter.run_completed`
 
 Every event is append-only, schema-validated, timestamped, uniquely identified, and marked
 `NO_AUTHORITY`. Projection fails closed when an asset or frame is unknown, an identifier is reused,
@@ -73,6 +76,11 @@ tracked asset ----------------------------+--> cartography.query_planned
                                                      |
                                                      v
                                       read-only local-ledger traversal
+
+cartography.query_planned --> fitter.run_completed --> receipt + result/abstention
+                                  ^
+                                  |
+                         fitter.registered
 ```
 
 Candidate resolution is a sidecar to entity identity, not an entity mutation. A candidate records
@@ -106,6 +114,35 @@ separate query lens; when either was recorded to the ledger after the cutoff, th
 lens as hindsight using ledger-recorded time rather than a backdatable domain timestamp. Results
 report excluded asset observations, known and uncharacterized blind regions, `NOT_ESTABLISHED`
 coverage, unevaluated surface validity conditions, no completeness claim, no network access, and
+`NO_AUTHORITY`.
+
+## Bounded multi-fitter runtime
+
+Phase 4 treats a fitter as an executable analytical observer over one immutable cartographic query
+result. The initial runtime registers three deterministic reference diagnostics:
+
+- a Bayesian diagnostic that groups dependent evidence before producing a Beta support index, which
+  is explicitly not a truth probability;
+- a graph diagnostic that reports relation topology without inferring influence, importance, or
+  causality;
+- a temporal diagnostic that reports observation cadence without inferring a trend, latent state,
+  regime, trajectory, or forecast.
+
+Every descriptor binds a versioned implementation digest, target metric, input/output contracts,
+admissibility rules, and declared invalid conditions. Empirical validity remains `NOT_ESTABLISHED`
+and is limited to the closed synthetic ledger. Bayesian execution requires exactly one claim and
+declared dependency groups. Graph execution abstains when relations are absent. Temporal execution
+is invalid when an `AS_KNOWN_THEN` input uses a hindsight-defined query lens.
+
+Each completed run records the full requested fitter set, input state version, canonical input
+digest, included and excluded identifiers, fitter implementation digest, assumptions, outcome
+digest, and non-authority policy. Interrupted appends remain visible as `PARTIAL` run groups with
+their missing fitters; retained results are never deleted to improve the demo.
+
+The group view preserves `FIT`, `ABSTAINED`, and `INVALID` outcomes and labels method-specific
+outputs as incommensurate when their target metrics differ. Consensus is `NOT_COMPUTED`, no fitter
+is privileged, and no averaging or weighting is performed. Residuals remain `NOT_AVAILABLE`,
+uncertainty remains `NOT_CALIBRATED`, prediction is `NOT_REQUESTED`, and all outputs remain
 `NO_AUTHORITY`.
 
 Claims are created with `epistemic_status: unresolved`. An evidence link records role or polarity,
@@ -155,8 +192,8 @@ artifact storage and live acquisition are later gated work.
    merge. *(implemented)*
 4. **Phase 3 bounded cartography** — observer-frame surfaces, explicit blind regions, persistent
    backward query plans, and deterministic local traversal. *(implemented)*
-5. **Phase 4 multi-fitter runtime** — bounded fitter inputs, receipts, residuals, validity, and
-   disagreement.
+5. **Phase 4 multi-fitter runtime** — bounded fitter inputs, digest-bound receipts, explicit
+   admissibility/invalidity, partial groups, and preserved disagreement. *(implemented)*
 6. **Phase 5 scenario and belief engine** — conditional branches without destiny claims.
 7. **Phase 6 asset workbench** — dense operator interface over the inspectable epistemic field.
 

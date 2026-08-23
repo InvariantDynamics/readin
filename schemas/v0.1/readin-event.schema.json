@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.readin.dev/v0.1/readin-event.schema.json",
   "title": "READIN Event v0.1",
-  "description": "Closed event envelope for the READIN Phase 0 through Phase 3 local ledger.",
+  "description": "Closed event envelope for the READIN Phase 0 through Phase 4 local ledger.",
   "type": "object",
   "required": [
     "schema_version",
@@ -29,7 +29,9 @@
         "entity.resolution_candidate_recorded",
         "entity.resolution_candidate_assessed",
         "cartography.surface_registered",
-        "cartography.query_planned"
+        "cartography.query_planned",
+        "fitter.registered",
+        "fitter.run_completed"
       ]
     },
     "occurred_at": { "$ref": "#/$defs/timestamp" },
@@ -167,6 +169,28 @@
           "payload": { "$ref": "#/$defs/cartographicQueryPlannedPayload" }
         }
       }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "fitter.registered" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/fitterRegisteredPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "fitter.run_completed" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/fitterRunCompletedPayload" }
+        }
+      }
     }
   ],
   "additionalProperties": false,
@@ -179,6 +203,7 @@
     "nullableUuid": {
       "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
     },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "accessPolicy": {
       "enum": ["PUBLIC", "LICENSED", "USER_OWNED", "OTHERWISE_AUTHORIZED"]
     },
@@ -1130,6 +1155,426 @@
       "required": ["cartographic_query_plan"],
       "properties": {
         "cartographic_query_plan": { "$ref": "#/$defs/cartographicQueryPlan" }
+      },
+      "additionalProperties": false
+    },
+    "fitterAdmissibilityRule": {
+      "type": "object",
+      "required": [
+        "minimum_observation_count",
+        "minimum_claim_count",
+        "maximum_claim_count",
+        "requires_relations",
+        "allows_hindsight_lens",
+        "requires_dependency_groups"
+      ],
+      "properties": {
+        "minimum_observation_count": { "type": "integer", "minimum": 0 },
+        "minimum_claim_count": { "type": "integer", "minimum": 0 },
+        "maximum_claim_count": {
+          "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }]
+        },
+        "requires_relations": { "type": "boolean" },
+        "allows_hindsight_lens": { "type": "boolean" },
+        "requires_dependency_groups": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "fitterDeclaredValidity": {
+      "type": "object",
+      "required": ["status", "domain", "invalid_conditions"],
+      "properties": {
+        "status": { "const": "NOT_ESTABLISHED" },
+        "domain": { "const": "CLOSED_SYNTHETIC_LEDGER_ONLY" },
+        "invalid_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "fitterDescriptor": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "fitter_class",
+        "version",
+        "implementation_kind",
+        "implementation_sha256",
+        "target_metric",
+        "input_contract",
+        "output_contract",
+        "admissibility_rule",
+        "declared_validity",
+        "deterministic",
+        "network_access",
+        "registered_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "fitter_class": { "enum": ["BAYESIAN", "GRAPH", "TEMPORAL"] },
+        "version": { "const": "0.1.0" },
+        "implementation_kind": { "const": "BUILTIN_DETERMINISTIC_REFERENCE" },
+        "implementation_sha256": { "$ref": "#/$defs/sha256" },
+        "target_metric": {
+          "enum": [
+            "DEPENDENCY_AWARE_CLAIM_SUPPORT",
+            "RELATION_TOPOLOGY",
+            "OBSERVATION_CADENCE"
+          ]
+        },
+        "input_contract": { "const": "READIN_CARTOGRAPHIC_QUERY_RESULT_V0_1" },
+        "output_contract": { "const": "READIN_FIT_RESULT_V0_1" },
+        "admissibility_rule": { "$ref": "#/$defs/fitterAdmissibilityRule" },
+        "declared_validity": { "$ref": "#/$defs/fitterDeclaredValidity" },
+        "deterministic": { "const": true },
+        "network_access": { "const": false },
+        "registered_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "fitterRegisteredPayload": {
+      "type": "object",
+      "required": ["fitter_descriptor"],
+      "properties": {
+        "fitter_descriptor": { "$ref": "#/$defs/fitterDescriptor" }
+      },
+      "additionalProperties": false
+    },
+    "fitterAdmissibility": {
+      "type": "object",
+      "required": ["status", "reasons", "evaluated_conditions"],
+      "properties": {
+        "status": { "enum": ["ADMISSIBLE", "INADMISSIBLE", "INVALID"] },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "uniqueItems": true
+        },
+        "evaluated_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["condition", "satisfied"],
+            "properties": {
+              "condition": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "satisfied": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "bayesianEstimate": {
+      "type": "object",
+      "required": [
+        "kind",
+        "posterior_mean",
+        "alpha",
+        "beta",
+        "support_units",
+        "challenge_units",
+        "conflicted_unit_count",
+        "dependent_source_count",
+        "independence_status"
+      ],
+      "properties": {
+        "kind": { "const": "DEPENDENCY_AWARE_CLAIM_SUPPORT" },
+        "posterior_mean": { "type": "number", "minimum": 0, "maximum": 1 },
+        "alpha": { "type": "number", "exclusiveMinimum": 0 },
+        "beta": { "type": "number", "exclusiveMinimum": 0 },
+        "support_units": { "type": "integer", "minimum": 0 },
+        "challenge_units": { "type": "integer", "minimum": 0 },
+        "conflicted_unit_count": { "type": "integer", "minimum": 0 },
+        "dependent_source_count": { "type": "integer", "minimum": 0 },
+        "independence_status": {
+          "enum": ["DEPENDENT_EVIDENCE_PRESENT", "INDEPENDENCE_NOT_ESTABLISHED"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "graphEstimate": {
+      "type": "object",
+      "required": [
+        "kind",
+        "directed_density",
+        "entity_count",
+        "relation_count",
+        "asset_out_degree",
+        "dependency_edge_count"
+      ],
+      "properties": {
+        "kind": { "const": "RELATION_TOPOLOGY" },
+        "directed_density": { "type": "number", "minimum": 0, "maximum": 1 },
+        "entity_count": { "type": "integer", "minimum": 0 },
+        "relation_count": { "type": "integer", "minimum": 0 },
+        "asset_out_degree": { "type": "integer", "minimum": 0 },
+        "dependency_edge_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "temporalEstimate": {
+      "type": "object",
+      "required": [
+        "kind",
+        "observation_count",
+        "distinct_timestamp_count",
+        "span_seconds",
+        "median_gap_seconds"
+      ],
+      "properties": {
+        "kind": { "const": "OBSERVATION_CADENCE" },
+        "observation_count": { "type": "integer", "minimum": 0 },
+        "distinct_timestamp_count": { "type": "integer", "minimum": 0 },
+        "span_seconds": { "type": "number", "minimum": 0 },
+        "median_gap_seconds": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "fitterEstimate": {
+      "oneOf": [
+        { "$ref": "#/$defs/bayesianEstimate" },
+        { "$ref": "#/$defs/graphEstimate" },
+        { "$ref": "#/$defs/temporalEstimate" }
+      ]
+    },
+    "betaDiagnosticDistribution": {
+      "type": "object",
+      "required": ["family", "alpha", "beta", "interpretation"],
+      "properties": {
+        "family": { "const": "BETA_DIAGNOSTIC" },
+        "alpha": { "type": "number", "exclusiveMinimum": 0 },
+        "beta": { "type": "number", "exclusiveMinimum": 0 },
+        "interpretation": { "const": "DIAGNOSTIC_INDEX_NOT_TRUTH_PROBABILITY" }
+      },
+      "additionalProperties": false
+    },
+    "fitResult": {
+      "type": "object",
+      "required": [
+        "id",
+        "fitter_id",
+        "fitter_version",
+        "query_plan_id",
+        "asset_entity_id",
+        "target_metric",
+        "estimate",
+        "distribution",
+        "input_observation_ids",
+        "input_claim_ids",
+        "input_relation_ids",
+        "input_evidence_manifest_ids",
+        "assumptions",
+        "residuals",
+        "uncertainty",
+        "validity",
+        "execution_receipt_id"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "fitter_id": { "$ref": "#/$defs/uuid" },
+        "fitter_version": { "const": "0.1.0" },
+        "query_plan_id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "target_metric": {
+          "enum": [
+            "DEPENDENCY_AWARE_CLAIM_SUPPORT",
+            "RELATION_TOPOLOGY",
+            "OBSERVATION_CADENCE"
+          ]
+        },
+        "estimate": { "$ref": "#/$defs/fitterEstimate" },
+        "distribution": {
+          "oneOf": [
+            { "$ref": "#/$defs/betaDiagnosticDistribution" },
+            { "type": "null" }
+          ]
+        },
+        "input_observation_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "input_claim_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "input_relation_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "input_evidence_manifest_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "assumptions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "uniqueItems": true
+        },
+        "residuals": {
+          "type": "object",
+          "required": ["status", "values"],
+          "properties": {
+            "status": { "const": "NOT_AVAILABLE" },
+            "values": { "const": {} }
+          },
+          "additionalProperties": false
+        },
+        "uncertainty": {
+          "type": "object",
+          "required": ["status", "interval"],
+          "properties": {
+            "status": { "const": "NOT_CALIBRATED" },
+            "interval": { "type": "null" }
+          },
+          "additionalProperties": false
+        },
+        "validity": {
+          "type": "object",
+          "required": ["status", "domain", "boundary_proximity", "invalid_conditions"],
+          "properties": {
+            "status": { "const": "NOT_ESTABLISHED" },
+            "domain": { "const": "CLOSED_SYNTHETIC_LEDGER_ONLY" },
+            "boundary_proximity": { "type": "null" },
+            "invalid_conditions": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "execution_receipt_id": { "$ref": "#/$defs/uuid" }
+      },
+      "additionalProperties": false
+    },
+    "fitterExecutionReceipt": {
+      "type": "object",
+      "required": [
+        "id",
+        "run_group_id",
+        "query_plan_id",
+        "asset_state_version",
+        "input_snapshot_sha256",
+        "input_observation_ids",
+        "input_claim_ids",
+        "input_relation_ids",
+        "input_evidence_manifest_ids",
+        "excluded_observation_ids",
+        "requested_fitter_ids",
+        "fitter_id",
+        "fitter_version",
+        "implementation_sha256",
+        "assumptions",
+        "runtime",
+        "network_access",
+        "consensus_policy",
+        "prediction_state",
+        "outcome_sha256",
+        "executed_at",
+        "authority_state"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "run_group_id": { "$ref": "#/$defs/uuid" },
+        "query_plan_id": { "$ref": "#/$defs/uuid" },
+        "asset_state_version": { "$ref": "#/$defs/uuid" },
+        "input_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "input_observation_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "input_claim_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "input_relation_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "input_evidence_manifest_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "excluded_observation_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "requested_fitter_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "fitter_id": { "$ref": "#/$defs/uuid" },
+        "fitter_version": { "const": "0.1.0" },
+        "implementation_sha256": { "$ref": "#/$defs/sha256" },
+        "assumptions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "uniqueItems": true
+        },
+        "runtime": { "const": "LOCAL_DETERMINISTIC_REFERENCE" },
+        "network_access": { "const": false },
+        "consensus_policy": { "const": "PRESERVE_DISAGREEMENT" },
+        "prediction_state": { "const": "NOT_REQUESTED" },
+        "outcome_sha256": { "$ref": "#/$defs/sha256" },
+        "executed_at": { "$ref": "#/$defs/timestamp" },
+        "authority_state": { "const": "NO_AUTHORITY" }
+      },
+      "additionalProperties": false
+    },
+    "fitterRun": {
+      "type": "object",
+      "required": [
+        "id",
+        "run_group_id",
+        "query_plan_id",
+        "fitter_id",
+        "outcome",
+        "admissibility",
+        "fit_result",
+        "execution_receipt",
+        "recorded_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "run_group_id": { "$ref": "#/$defs/uuid" },
+        "query_plan_id": { "$ref": "#/$defs/uuid" },
+        "fitter_id": { "$ref": "#/$defs/uuid" },
+        "outcome": { "enum": ["FIT", "ABSTAINED", "INVALID"] },
+        "admissibility": { "$ref": "#/$defs/fitterAdmissibility" },
+        "fit_result": {
+          "oneOf": [{ "$ref": "#/$defs/fitResult" }, { "type": "null" }]
+        },
+        "execution_receipt": { "$ref": "#/$defs/fitterExecutionReceipt" },
+        "recorded_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "fitterRunCompletedPayload": {
+      "type": "object",
+      "required": ["fitter_run"],
+      "properties": {
+        "fitter_run": { "$ref": "#/$defs/fitterRun" }
       },
       "additionalProperties": false
     }

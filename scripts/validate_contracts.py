@@ -1,4 +1,4 @@
-"""Validate the schema, Phase 3 loop, and fail-closed negative vectors."""
+"""Validate the schema, Phase 4 loop, and fail-closed negative vectors."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from copy import deepcopy
 from jsonschema import Draft202012Validator
 
 from readin.contracts import ContractViolation, load_event_schema, validate_event
+from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
-from readin.synthetic import phase3_events
+from readin.synthetic import phase4_events
 
 
 def _must_reject_contract(event: dict[str, object]) -> None:
@@ -22,7 +23,7 @@ def _must_reject_contract(event: dict[str, object]) -> None:
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
-    events = phase3_events()
+    events = phase4_events()
     for event in events:
         validate_event(event)
     projection = ReadinProjection.replay(events)
@@ -127,13 +128,47 @@ def main() -> None:
     if query_result["aperture"]["coverage_state"] != "NOT_ESTABLISHED":
         raise AssertionError("cartographic query promoted bounded aperture to coverage")
 
+    invalid_fitter = deepcopy(events[25])
+    invalid_fitter["payload"]["fitter_descriptor"]["implementation_sha256"] = "0" * 64
+    try:
+        ReadinProjection.replay([*events[:25], invalid_fitter])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("non-reference fitter implementation was accepted")
+
+    invalid_fit = deepcopy(events[28])
+    fitter_run = invalid_fit["payload"]["fitter_run"]
+    fitter_run["fit_result"]["estimate"]["posterior_mean"] = 0.99
+    fitter_run["execution_receipt"]["outcome_sha256"] = canonical_sha256(
+        {
+            "outcome": fitter_run["outcome"],
+            "admissibility": fitter_run["admissibility"],
+            "fit_result": fitter_run["fit_result"],
+        }
+    )
+    try:
+        ReadinProjection.replay([*events[:28], invalid_fit])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("non-reference fitter estimate was accepted")
+
+    fitter_view = projection.multi_fitter_run_view("65656565-6565-4656-8565-656565656565")
+    if fitter_view["consensus"]["state"] != "NOT_COMPUTED":
+        raise AssertionError("multi-fitter runtime forced consensus")
+    if fitter_view["outcome_counts"]["INVALID"] != 1:
+        raise AssertionError("multi-fitter runtime suppressed model invalidity")
+
     print(
         f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=3 "
-        f"negative_semantic_vectors=8 tracked_assets={len(projection.assets)} "
+        f"negative_semantic_vectors=10 tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
         f"resolution_candidates={len(projection.resolution_candidates)} "
         f"cartographic_surfaces={len(projection.cartographic_surfaces)} "
-        f"cartographic_query_plans={len(projection.cartographic_query_plans)}"
+        f"cartographic_query_plans={len(projection.cartographic_query_plans)} "
+        f"fitters={len(projection.fitters)} fitter_runs={len(projection.fitter_runs)} "
+        f"fit_results={len(projection.fit_results)}"
     )
 
 

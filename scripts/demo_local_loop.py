@@ -1,4 +1,4 @@
-"""Run the closed synthetic Phase 3 cartographic loop in a temporary local ledger."""
+"""Run the closed synthetic Phase 4 multi-fitter loop in a temporary local ledger."""
 
 from __future__ import annotations
 
@@ -6,21 +6,19 @@ import json
 from tempfile import TemporaryDirectory
 
 from readin.store import EventLedger
-from readin.synthetic import phase3_events
+from readin.synthetic import phase4_events
 
 
 def main() -> None:
     with TemporaryDirectory(prefix="readin-demo-") as directory:
         ledger = EventLedger(f"{directory}/events.jsonl")
         ledger.initialize()
-        events = phase3_events()
+        events = phase4_events()
         for event in events:
             ledger.append(event)
         print(
             json.dumps(
-                ledger.projection().execute_cartographic_query(
-                    "39393939-3939-4393-8393-393939393939"
-                ),
+                ledger.projection().multi_fitter_run_view("65656565-6565-4656-8565-656565656565"),
                 indent=2,
                 sort_keys=True,
                 ensure_ascii=False,

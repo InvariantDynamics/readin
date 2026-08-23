@@ -1,4 +1,4 @@
-"""Typed event factories for the READIN Phase 0 through Phase 3 contracts."""
+"""Typed event factories for the READIN Phase 0 through Phase 4 contracts."""
 
 from __future__ import annotations
 
@@ -569,6 +569,75 @@ def create_cartographic_query_planned(
     return _event(
         "cartography.query_planned",
         {"cartographic_query_plan": query_plan},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_fitter_registered(
+    name: str,
+    fitter_class: str,
+    implementation_sha256: str,
+    target_metric: str,
+    *,
+    minimum_observation_count: int,
+    minimum_claim_count: int,
+    maximum_claim_count: int | None,
+    requires_relations: bool,
+    allows_hindsight_lens: bool,
+    requires_dependency_groups: bool,
+    invalid_conditions: Iterable[str],
+    fitter_id: str | UUID | None = None,
+    registered_at: str | datetime | None = None,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    descriptor = {
+        "id": _uuid(fitter_id),
+        "name": name,
+        "fitter_class": fitter_class,
+        "version": "0.1.0",
+        "implementation_kind": "BUILTIN_DETERMINISTIC_REFERENCE",
+        "implementation_sha256": implementation_sha256,
+        "target_metric": target_metric,
+        "input_contract": "READIN_CARTOGRAPHIC_QUERY_RESULT_V0_1",
+        "output_contract": "READIN_FIT_RESULT_V0_1",
+        "admissibility_rule": {
+            "minimum_observation_count": minimum_observation_count,
+            "minimum_claim_count": minimum_claim_count,
+            "maximum_claim_count": maximum_claim_count,
+            "requires_relations": requires_relations,
+            "allows_hindsight_lens": allows_hindsight_lens,
+            "requires_dependency_groups": requires_dependency_groups,
+        },
+        "declared_validity": {
+            "status": "NOT_ESTABLISHED",
+            "domain": "CLOSED_SYNTHETIC_LEDGER_ONLY",
+            "invalid_conditions": list(invalid_conditions),
+        },
+        "deterministic": True,
+        "network_access": False,
+        "registered_at": _timestamp(registered_at or event_time),
+    }
+    return _event(
+        "fitter.registered",
+        {"fitter_descriptor": descriptor},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_fitter_run_completed(
+    fitter_run: Mapping[str, Any],
+    *,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    return _event(
+        "fitter.run_completed",
+        {"fitter_run": dict(fitter_run)},
         event_id=event_id,
         occurred_at=event_time,
     )

@@ -6,7 +6,13 @@ import pytest
 
 from readin.contracts import ContractViolation, validate_event
 from readin.events import create_entity_created
-from readin.synthetic import phase0_events, phase1_events, phase2_events, phase3_events
+from readin.synthetic import (
+    phase0_events,
+    phase1_events,
+    phase2_events,
+    phase3_events,
+    phase4_events,
+)
 
 
 def test_synthetic_phase0_events_conform() -> None:
@@ -60,6 +66,28 @@ def test_synthetic_phase3_events_conform_without_execution_authority() -> None:
     assert query["direction"] == "BACKWARD"
     assert query["prediction_state"] == "NOT_REQUESTED"
     assert query["execution_state"] == "PLANNED_READ_ONLY"
+
+
+def test_synthetic_phase4_events_conform_without_consensus_or_model_authority() -> None:
+    events = phase4_events()
+    assert len(events) == 31
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    descriptors = [event["payload"]["fitter_descriptor"] for event in events[25:28]]
+    runs = [event["payload"]["fitter_run"] for event in events[28:31]]
+    assert {item["fitter_class"] for item in descriptors} == {
+        "BAYESIAN",
+        "GRAPH",
+        "TEMPORAL",
+    }
+    assert all(item["network_access"] is False for item in descriptors)
+    assert [item["outcome"] for item in runs] == ["FIT", "FIT", "INVALID"]
+    assert all(
+        item["execution_receipt"]["consensus_policy"] == "PRESERVE_DISAGREEMENT" for item in runs
+    )
+    assert all(item["execution_receipt"]["prediction_state"] == "NOT_REQUESTED" for item in runs)
 
 
 def test_closed_event_rejects_unknown_field() -> None:

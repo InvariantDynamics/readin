@@ -21,6 +21,11 @@ from readin.events import (
     create_resolution_candidate_recorded,
     create_tracking_started,
 )
+from readin.fitters import (
+    create_reference_fitter_registration,
+    execute_reference_fitter_group,
+)
+from readin.projection import ReadinProjection
 
 
 def phase0_events() -> list[dict[str, Any]]:
@@ -426,4 +431,50 @@ def phase3_events() -> list[dict[str, Any]]:
             ),
         ]
     )
+    return events
+
+
+def phase4_events() -> list[dict[str, Any]]:
+    """Return three heterogeneous reference-fitter runs over one bounded query."""
+
+    events = phase3_events()
+    fitter_ids = [
+        "61616161-6161-4616-8161-616161616161",
+        "62626262-6262-4626-8262-626262626262",
+        "63636363-6363-4636-8363-636363636363",
+    ]
+    for fitter_class, fitter_id, event_id, occurred_at in zip(
+        ("BAYESIAN", "GRAPH", "TEMPORAL"),
+        fitter_ids,
+        (
+            "64646464-6464-4646-8464-646464646461",
+            "64646464-6464-4646-8464-646464646462",
+            "64646464-6464-4646-8464-646464646463",
+        ),
+        (
+            "2026-08-21T12:00:25Z",
+            "2026-08-21T12:00:26Z",
+            "2026-08-21T12:00:27Z",
+        ),
+        strict=True,
+    ):
+        events.append(
+            create_reference_fitter_registration(
+                fitter_class,
+                fitter_id=fitter_id,
+                event_id=event_id,
+                occurred_at=occurred_at,
+            )
+        )
+
+    projection = ReadinProjection.replay(events)
+    run_events = execute_reference_fitter_group(
+        projection,
+        "39393939-3939-4393-8393-393939393939",
+        fitter_ids,
+        run_group_id="65656565-6565-4656-8565-656565656565",
+        occurred_at="2026-08-21T12:00:28Z",
+        deterministic_ids=True,
+    )
+    events.extend(run_events)
     return events
