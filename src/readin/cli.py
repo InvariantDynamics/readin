@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 through Phase 6 runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 7 runtime."""
 
 from __future__ import annotations
 
@@ -11,6 +11,11 @@ from typing import Any
 
 from readin.belief import BeliefRuntimeError, execute_belief_revision
 from readin.contracts import ContractViolation
+from readin.discrimination import (
+    DiscriminationRuntimeError,
+    create_bounded_discrimination_plan,
+    execute_discrimination_plan,
+)
 from readin.events import (
     create_belief_edge_created,
     create_cartographic_query_planned,
@@ -422,6 +427,33 @@ def _build_parser() -> argparse.ArgumentParser:
     run_scenario_parser.add_argument("--scenario", required=True)
     run_scenario_parser.add_argument("--run-id")
 
+    discrimination_parser = subparsers.add_parser(
+        "plan-discriminating-observations",
+        help="Rank manual observation candidates without collecting from any source",
+    )
+    _add_ledger_argument(discrimination_parser)
+    discrimination_parser.add_argument("--asset", required=True)
+    discrimination_parser.add_argument("--name", required=True)
+    discrimination_parser.add_argument("--ambiguity", required=True)
+    discrimination_parser.add_argument("--belief-revision", required=True)
+    discrimination_parser.add_argument("--query", required=True)
+    discrimination_parser.add_argument("--hypothesis", required=True, action="append")
+    discrimination_parser.add_argument(
+        "--candidate-json",
+        required=True,
+        action="append",
+        help="Manual observation candidate JSON; repeat for multiple candidates",
+    )
+    discrimination_parser.add_argument("--plan-id")
+
+    run_discrimination_parser = subparsers.add_parser(
+        "run-discrimination-plan",
+        help="Execute structural ordinal ranking without acquiring observations",
+    )
+    _add_ledger_argument(run_discrimination_parser)
+    run_discrimination_parser.add_argument("--plan", required=True)
+    run_discrimination_parser.add_argument("--run-id")
+
     show_parser = subparsers.add_parser("show-asset", help="Replay and inspect one tracked asset")
     _add_ledger_argument(show_parser)
     show_parser.add_argument("--asset", required=True)
@@ -504,6 +536,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_ledger_argument(scenario_run_view_parser)
     scenario_run_view_parser.add_argument("--run", required=True)
+
+    discrimination_view_parser = subparsers.add_parser(
+        "show-discrimination-plan",
+        help="Inspect one bounded observation-discrimination plan and ranking",
+    )
+    _add_ledger_argument(discrimination_view_parser)
+    discrimination_view_parser.add_argument("--plan", required=True)
+
+    discrimination_run_view_parser = subparsers.add_parser(
+        "show-discrimination-run",
+        help="Inspect one structural ranking and its no-collection receipt",
+    )
+    _add_ledger_argument(discrimination_run_view_parser)
+    discrimination_run_view_parser.add_argument("--run", required=True)
 
     list_parser = subparsers.add_parser("list-assets", help="Replay and list the tracked catalog")
     _add_ledger_argument(list_parser)
@@ -820,6 +866,34 @@ def _run(args: argparse.Namespace) -> Any:
         run_id = event["payload"]["scenario_run"]["id"]
         return ledger.projection().scenario_run_view(run_id)
 
+    if args.command == "plan-discriminating-observations":
+        projection = ledger.projection()
+        event = create_bounded_discrimination_plan(
+            projection,
+            args.asset,
+            args.name,
+            args.ambiguity,
+            args.belief_revision,
+            args.query,
+            args.hypothesis,
+            [_json_object(item) for item in args.candidate_json],
+            plan_id=args.plan_id,
+        )
+        ledger.append(event)
+        plan_id = event["payload"]["discrimination_plan"]["id"]
+        return ledger.projection().discrimination_plan_view(plan_id)
+
+    if args.command == "run-discrimination-plan":
+        projection = ledger.projection()
+        event = execute_discrimination_plan(
+            projection,
+            args.plan,
+            run_id=args.run_id,
+        )
+        ledger.append(event)
+        run_id = event["payload"]["discrimination_run"]["id"]
+        return ledger.projection().discrimination_run_view(run_id)
+
     projection = ledger.projection()
     if args.command == "show-asset":
         return projection.asset_view_at(
@@ -855,6 +929,10 @@ def _run(args: argparse.Namespace) -> Any:
         return projection.scenario_view(args.scenario)
     if args.command == "show-scenario-run":
         return projection.scenario_run_view(args.run)
+    if args.command == "show-discrimination-plan":
+        return projection.discrimination_plan_view(args.plan)
+    if args.command == "show-discrimination-run":
+        return projection.discrimination_run_view(args.run)
     if args.command == "list-assets":
         return projection.catalog_view()
     if args.command == "show-workbench":
@@ -870,6 +948,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     except (
         ContractViolation,
+        DiscriminationRuntimeError,
         BeliefRuntimeError,
         FitterRuntimeError,
         KeyError,

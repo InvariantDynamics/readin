@@ -13,6 +13,7 @@ from readin.synthetic import (
     phase3_events,
     phase4_events,
     phase5_events,
+    phase7_events,
 )
 
 
@@ -119,6 +120,34 @@ def test_phase5_contract_rejects_probability_and_prediction_promotion() -> None:
     scenario_event["payload"]["scenario"]["prediction_state"] = "FORECAST"
     with pytest.raises(ContractViolation, match="NOT_REQUESTED"):
         validate_event(scenario_event)
+
+
+def test_synthetic_phase7_events_conform_without_collection_authority() -> None:
+    events = phase7_events()
+    assert len(events) == 40
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    plan = events[38]["payload"]["discrimination_plan"]
+    run = events[39]["payload"]["discrimination_run"]
+    assert plan["collection_state"] == "NOT_STARTED"
+    assert plan["policy_context"]["collection_authority"] == "NOT_GRANTED"
+    assert run["acquisition_state"] == "NOT_ATTEMPTED"
+    assert run["expected_information_gain_state"] == "NOT_COMPUTED"
+    assert run["execution_receipt"]["network_access"] is False
+
+
+def test_phase7_contract_rejects_collection_and_probability_promotion() -> None:
+    plan_event = deepcopy(phase7_events()[38])
+    plan_event["payload"]["discrimination_plan"]["collection_state"] = "STARTED"
+    with pytest.raises(ContractViolation, match="NOT_STARTED"):
+        validate_event(plan_event)
+
+    run_event = deepcopy(phase7_events()[39])
+    run_event["payload"]["discrimination_run"]["probability_state"] = "COMPUTED"
+    with pytest.raises(ContractViolation, match="NOT_COMPUTED"):
+        validate_event(run_event)
 
 
 def test_closed_event_rejects_unknown_field() -> None:

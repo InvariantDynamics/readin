@@ -1,4 +1,4 @@
-"""Validate the schema, Phase 5 loop, and fail-closed negative vectors."""
+"""Validate the schema, Phase 7 loop, and fail-closed negative vectors."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator
 from readin.contracts import ContractViolation, load_event_schema, validate_event
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
-from readin.synthetic import phase5_events
+from readin.synthetic import phase7_events
 from readin.workbench import WorkbenchError, build_workbench_snapshot, validate_loopback_host
 
 
@@ -24,7 +24,7 @@ def _must_reject_contract(event: dict[str, object]) -> None:
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
-    events = phase5_events()
+    events = phase7_events()
     for event in events:
         validate_event(event)
     projection = ReadinProjection.replay(events)
@@ -48,6 +48,16 @@ def main() -> None:
     invalid_scenario_contract = deepcopy(events[35])
     invalid_scenario_contract["payload"]["scenario"]["prediction_state"] = "FORECAST"
     _must_reject_contract(invalid_scenario_contract)
+
+    invalid_collection_contract = deepcopy(events[38])
+    invalid_collection_contract["payload"]["discrimination_plan"]["collection_state"] = "STARTED"
+    _must_reject_contract(invalid_collection_contract)
+
+    invalid_discrimination_probability = deepcopy(events[39])
+    invalid_discrimination_probability["payload"]["discrimination_run"]["probability_state"] = (
+        "COMPUTED"
+    )
+    _must_reject_contract(invalid_discrimination_probability)
 
     try:
         ReadinProjection.replay([events[4]])
@@ -210,6 +220,32 @@ def main() -> None:
     if scenario_view["prediction_state"] != "NOT_REQUESTED":
         raise AssertionError("scenario runtime promoted branch evaluation to prediction")
 
+    invalid_discrimination_plan = deepcopy(events[38])
+    invalid_discrimination_plan["payload"]["discrimination_plan"]["candidates"][0][
+        "declared_blind_region_targets"
+    ] = ["Invented blind region"]
+    try:
+        ReadinProjection.replay([*events[:38], invalid_discrimination_plan])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("discrimination plan targeted an unknown blind region")
+
+    invalid_discrimination_run = deepcopy(events[39])
+    invalid_discrimination_run["payload"]["discrimination_run"]["candidate_scores"][0]["rank"] = 2
+    try:
+        ReadinProjection.replay([*events[:39], invalid_discrimination_run])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("non-reference discrimination ranking was accepted")
+
+    discrimination_view = projection.discrimination_run_view("94949494-9494-4494-8494-949494949491")
+    if discrimination_view["acquisition_state"] != "NOT_ATTEMPTED":
+        raise AssertionError("discrimination planning promoted ranking to acquisition")
+    if discrimination_view["run"]["execution_receipt"]["network_access"]:
+        raise AssertionError("discrimination planning acquired network access")
+
     workbench = build_workbench_snapshot(projection, "11111111-1111-4111-8111-111111111111")
     if workbench["authority"]["state"] != "NO_AUTHORITY":
         raise AssertionError("workbench projection acquired action authority")
@@ -222,6 +258,11 @@ def main() -> None:
         for branch in workbench["selected_asset"]["scenarios"][0]["branches"]
     ):
         raise AssertionError("workbench projection suppressed the unmodeled region")
+    collection = workbench["selected_asset"]["collection"]["latest_discrimination"]
+    if collection["acquisition_state"] != "NOT_ATTEMPTED":
+        raise AssertionError("workbench promoted observation planning to acquisition")
+    if collection["expected_information_gain_state"] != "NOT_COMPUTED":
+        raise AssertionError("workbench promoted ordinal ranking to information gain")
 
     try:
         build_workbench_snapshot(projection, "unknown-asset")
@@ -237,8 +278,8 @@ def main() -> None:
         raise AssertionError("workbench accepted a non-loopback host")
 
     print(
-        f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=5 "
-        f"negative_semantic_vectors=13 tracked_assets={len(projection.assets)} "
+        f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=7 "
+        f"negative_semantic_vectors=15 tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
         f"resolution_candidates={len(projection.resolution_candidates)} "
         f"cartographic_surfaces={len(projection.cartographic_surfaces)} "
@@ -247,6 +288,8 @@ def main() -> None:
         f"fit_results={len(projection.fit_results)} hypotheses={len(projection.hypotheses)} "
         f"belief_revisions={len(projection.belief_revisions)} "
         f"scenarios={len(projection.scenarios)} scenario_runs={len(projection.scenario_runs)} "
+        f"discrimination_plans={len(projection.discrimination_plans)} "
+        f"discrimination_runs={len(projection.discrimination_runs)} "
         "workbench_contracts=1 negative_workbench_vectors=2"
     )
 

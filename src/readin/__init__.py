@@ -1,13 +1,20 @@
-"""READIN Phase 0 through Phase 6 reference runtime."""
+"""READIN Phase 0 through Phase 7 reference runtime."""
 
 from readin.belief import BeliefRuntimeError, execute_belief_revision
 from readin.contracts import ContractViolation, validate_event
+from readin.discrimination import (
+    DiscriminationRuntimeError,
+    create_bounded_discrimination_plan,
+    execute_discrimination_plan,
+)
 from readin.events import (
     create_belief_edge_created,
     create_belief_revision_completed,
     create_cartographic_query_planned,
     create_cartographic_surface_registered,
     create_claim_created,
+    create_collection_discrimination_plan_created,
+    create_collection_discrimination_run_completed,
     create_entity_created,
     create_evidence_dependency_declared,
     create_evidence_linked,
@@ -41,6 +48,7 @@ from readin.workbench import WorkbenchError, build_workbench_snapshot, create_wo
 __all__ = [
     "ContractViolation",
     "BeliefRuntimeError",
+    "DiscriminationRuntimeError",
     "EventLedger",
     "FitterRuntimeError",
     "LedgerError",
@@ -52,9 +60,12 @@ __all__ = [
     "create_belief_edge_created",
     "create_belief_revision_completed",
     "create_bounded_scenario",
+    "create_bounded_discrimination_plan",
     "create_cartographic_query_planned",
     "create_cartographic_surface_registered",
     "create_claim_created",
+    "create_collection_discrimination_plan_created",
+    "create_collection_discrimination_run_completed",
     "create_entity_created",
     "create_evidence_dependency_declared",
     "create_evidence_linked",
@@ -74,8 +85,9 @@ __all__ = [
     "create_workbench_server",
     "execute_reference_fitter_group",
     "execute_belief_revision",
+    "execute_discrimination_plan",
     "execute_scenario",
     "validate_event",
 ]
 
-__version__ = "0.1.0.dev6"
+__version__ = "0.1.0.dev7"

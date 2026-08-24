@@ -28,7 +28,7 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 6 slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 7 slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -54,6 +54,9 @@ The Phase 0 through bounded Phase 6 slices are local-first and manual-input only
 - structural branch-antecedent evaluation without likelihoods or simulated trajectories;
 - deterministic read-only workbench projection over one replayed local ledger;
 - loopback-only static asset workbench with no write endpoint;
+- manual, ambiguity-bound candidate-observation plans;
+- deterministic ordinal structural-discrimination ranking with ties and abstention;
+- digest-bound discrimination receipts with collection and acquisition fixed off;
 - append-only JSONL event persistence;
 - deterministic asset-state replay;
 - schema validation and fail-closed referential checks.
@@ -72,6 +75,9 @@ likelihood assignment, trajectory simulation, prediction, or action.
 The Phase 6 workbench is a local presentation and replay surface only. It binds to loopback,
 refuses mutation methods, performs no authentication or remote service exposure, and does not add
 scientific, operational, surveillance, targeting, or action authority.
+The Phase 7 planner ranks only user-declared expected effects. It performs no source query,
+acquisition, expected-information-gain calculation, probability calculation, feasibility
+validation, source-independence validation, or collection recommendation with action authority.
 
 ## Contract changes
 

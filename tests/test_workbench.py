@@ -10,7 +10,7 @@ import pytest
 from readin.cli import main
 from readin.projection import ReadinProjection
 from readin.store import EventLedger
-from readin.synthetic import phase5_events
+from readin.synthetic import phase5_events, phase7_events
 from readin.workbench import (
     WorkbenchError,
     build_workbench_snapshot,
@@ -54,6 +54,9 @@ def test_workbench_projection_preserves_phase5_boundaries() -> None:
         "trajectory_state": "NOT_SIMULATED",
         "empirical_validity_state": "NOT_ESTABLISHED",
         "consensus_state": "NOT_COMPUTED",
+        "collection_state": "NOT_STARTED",
+        "acquisition_state": "NOT_ATTEMPTED",
+        "source_independence_state": "NOT_ESTABLISHED",
     }
 
     asset = snapshot["selected_asset"]
@@ -70,6 +73,21 @@ def test_workbench_projection_preserves_phase5_boundaries() -> None:
     )
     assert asset["scenarios"][0]["prediction_state"] == "NOT_REQUESTED"
     assert asset["authority_state"] == "NO_AUTHORITY"
+
+
+def test_workbench_exposes_phase7_next_observation_without_collection() -> None:
+    snapshot = build_workbench_snapshot(ReadinProjection.replay(phase7_events()), ASSET_ID)
+    collection = snapshot["selected_asset"]["collection"]["latest_discrimination"]
+
+    assert snapshot["generated_from"]["event_count"] == 40
+    assert collection["recommendation_state"] == "RANKED_STRUCTURAL_CANDIDATES"
+    assert collection["candidates"][0]["rank"] == 1
+    assert collection["candidates"][0]["name"] == "Independent activity verification"
+    assert collection["candidates"][1]["rank"] is None
+    assert collection["collection_state"] == "NOT_STARTED"
+    assert collection["acquisition_state"] == "NOT_ATTEMPTED"
+    assert collection["source_independence_state"] == "NOT_ESTABLISHED"
+    assert collection["expected_information_gain_state"] == "NOT_COMPUTED"
 
 
 def test_workbench_projection_supports_empty_catalog_and_rejects_unknown_asset() -> None:
@@ -101,6 +119,7 @@ def test_workbench_server_is_static_and_read_only(tmp_path: Path) -> None:
         body = response.read().decode("utf-8")
         assert response.status == 200
         assert "READIN Asset Workbench" in body
+        assert "Next observation" in body
         assert response.getheader("Content-Security-Policy") == (
             "default-src 'self'; script-src 'self'"
         )

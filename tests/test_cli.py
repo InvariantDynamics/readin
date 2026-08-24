@@ -5,7 +5,13 @@ from pathlib import Path
 
 from readin.cli import main
 from readin.store import EventLedger
-from readin.synthetic import phase1_events, phase2_events, phase3_events, phase5_events
+from readin.synthetic import (
+    phase1_events,
+    phase2_events,
+    phase3_events,
+    phase5_events,
+    phase7_events,
+)
 
 
 def test_cli_initializes_and_tracks_entity(tmp_path: Path, capsys: object) -> None:
@@ -323,3 +329,103 @@ def test_cli_exposes_belief_revision_and_non_predictive_scenario(
     assert scenario["trajectory_state"] == "NOT_SIMULATED"
     assert scenario["prediction_state"] == "NOT_REQUESTED"
     assert scenario["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_exposes_discrimination_run_without_acquisition(tmp_path: Path, capsys: object) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase7_events():
+        ledger.append(event)
+
+    result = main(
+        [
+            "show-discrimination-run",
+            "--ledger",
+            str(ledger.path),
+            "--run",
+            "94949494-9494-4494-8494-949494949491",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+
+    assert result == 0
+    assert output["run"]["recommendation_state"] == "RANKED_STRUCTURAL_CANDIDATES"
+    assert output["run"]["acquisition_state"] == "NOT_ATTEMPTED"
+    assert output["run"]["execution_receipt"]["network_access"] is False
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_creates_and_runs_manual_discrimination_plan(tmp_path: Path, capsys: object) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase7_events()[:38]:
+        ledger.append(event)
+    candidate = json.dumps(
+        {
+            "id": "99999999-9999-4999-8999-999999999991",
+            "name": "CLI verification candidate",
+            "observer_frame_id": "91919191-9191-4191-8191-919191919191",
+            "observation_type": "manual.cli_verification",
+            "question": "Would an authorized verification artifact discriminate?",
+            "expected_outcomes": [
+                {
+                    "label": "Artifact observed",
+                    "hypothesis_effects": [
+                        {
+                            "hypothesis_id": "81818181-8181-4181-8181-818181818181",
+                            "effect": "NO_EFFECT",
+                        },
+                        {
+                            "hypothesis_id": "82828282-8282-4282-8282-828282828282",
+                            "effect": "SUPPORTS_HYPOTHESIS",
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+    result = main(
+        [
+            "plan-discriminating-observations",
+            "--ledger",
+            str(ledger.path),
+            "--asset",
+            "11111111-1111-4111-8111-111111111111",
+            "--name",
+            "CLI discrimination fixture",
+            "--ambiguity",
+            "Relationship evidence may not establish current activity",
+            "--belief-revision",
+            "84848484-8484-4484-8484-848484848481",
+            "--query",
+            "39393939-3939-4393-8393-393939393939",
+            "--hypothesis",
+            "81818181-8181-4181-8181-818181818181",
+            "--hypothesis",
+            "82828282-8282-4282-8282-828282828282",
+            "--candidate-json",
+            candidate,
+            "--plan-id",
+            "99999999-9999-4999-8999-999999999992",
+        ]
+    )
+    plan_output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert plan_output["collection_state"] == "NOT_STARTED"
+    assert plan_output["run"] is None
+
+    result = main(
+        [
+            "run-discrimination-plan",
+            "--ledger",
+            str(ledger.path),
+            "--plan",
+            "99999999-9999-4999-8999-999999999992",
+            "--run-id",
+            "99999999-9999-4999-8999-999999999993",
+        ]
+    )
+    run_output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert run_output["run"]["top_candidate_ids"] == ["99999999-9999-4999-8999-999999999991"]
+    assert run_output["acquisition_state"] == "NOT_ATTEMPTED"

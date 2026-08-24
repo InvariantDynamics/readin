@@ -111,6 +111,9 @@ function renderLimits() {
     trajectory_state: "Trajectory",
     empirical_validity_state: "Empirical validity",
     consensus_state: "Consensus",
+    collection_state: "Collection",
+    acquisition_state: "Acquisition",
+    source_independence_state: "Source independence",
   };
   byId("limit-list").innerHTML = Object.entries(state.snapshot.epistemic_limits)
     .map(
@@ -307,6 +310,39 @@ function renderScenarios(asset) {
     .join("")}</div>`;
 }
 
+function renderCollection(asset) {
+  const plan = asset.collection.latest_discrimination;
+  if (!plan) return emptyState();
+  const rows = plan.candidates.length
+    ? `<ul class="record-list">${plan.candidates
+        .map(
+          (candidate) => `<li class="record-row">
+            <div class="record-primary">${escapeHtml(candidate.name)}
+              <small>${candidate.rank ? `rank ${candidate.rank}` : "not ranked"} · effort ${escapeHtml(candidate.effort)}</small>
+            </div>
+            <div class="record-secondary">${escapeHtml(candidate.question)}
+              <small>${escapeHtml(candidate.observer_frame_name)} · separation ${candidate.directional_separation_units} · distinguished pairs ${candidate.distinguished_hypothesis_pair_units} · discriminating outcomes ${candidate.discriminating_outcome_count} · blind-region alignment ${candidate.blind_region_alignment_count}</small>
+            </div>
+            ${stateTag(candidate.discrimination_state)}
+          </li>`,
+        )
+        .join("")}</ul>`
+    : emptyState();
+  const boundary = `<div class="collection-boundary">
+    <div><span>Ambiguity</span><strong>${escapeHtml(plan.ambiguity_statement)}</strong></div>
+    <div class="collection-boundary-states">
+      ${stateTag(plan.collection_state)}
+      ${stateTag(plan.acquisition_state)}
+      ${stateTag(plan.source_independence_state)}
+    </div>
+    <p>Manual expected effects are ranked by a structural ordinal heuristic. Expected information gain and probabilities are not computed. No source was queried or acquired.</p>
+  </div>`;
+  return `<div class="overview-grid">
+    ${sectionCard(plan.name, plan.recommendation_state, boundary, true)}
+    ${sectionCard("Candidate observations", `${plan.candidates.length} manually declared`, rows, true)}
+  </div>`;
+}
+
 function renderTimeline(asset) {
   if (!asset.timeline.length) return emptyState();
   const rows = asset.timeline
@@ -329,6 +365,7 @@ function renderActiveView(asset) {
     relations: renderRelations,
     belief: renderBelief,
     scenarios: renderScenarios,
+    collection: renderCollection,
     timeline: renderTimeline,
   };
   byId("view-panel").innerHTML = renderers[state.activeTab](asset);

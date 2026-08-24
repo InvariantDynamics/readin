@@ -7,6 +7,10 @@ import json
 from typing import Any
 
 from readin.belief import execute_belief_revision
+from readin.discrimination import (
+    create_bounded_discrimination_plan,
+    execute_discrimination_plan,
+)
 from readin.events import (
     create_belief_edge_created,
     create_cartographic_query_planned,
@@ -604,4 +608,136 @@ def phase5_events() -> list[dict[str, Any]]:
         occurred_at="2026-08-21T12:00:34Z",
     )
     events.append(run_event)
+    return events
+
+
+def phase7_events() -> list[dict[str, Any]]:
+    """Return a local discriminating-observation ranking without collection."""
+
+    events = phase5_events()
+    asset_id = "11111111-1111-4111-8111-111111111111"
+    upstream_hypothesis_id = "81818181-8181-4181-8181-818181818181"
+    downstream_hypothesis_id = "82828282-8282-4282-8282-828282828282"
+    independent_frame_id = "91919191-9191-4191-8191-919191919191"
+
+    frame_event = create_observer_frame_registered(
+        "Synthetic independent technical verification",
+        "independent_technical_record",
+        access_description="Closed synthetic independent-verification fixture",
+        measurement_name="manual_verification_recording",
+        measurement_description="A user could record an authorized verification artifact",
+        known_blind_regions=["No direct internal telemetry"],
+        validity_conditions=["Valid only for the bundled synthetic planning fixture"],
+        frame_id=independent_frame_id,
+        event_id="91919191-9191-4191-8191-919191919192",
+        occurred_at="2026-08-21T12:00:35Z",
+    )
+    events.append(frame_event)
+    projection = ReadinProjection.replay(events)
+
+    plan_event = create_bounded_discrimination_plan(
+        projection,
+        asset_id,
+        "Resolve relationship versus activity ambiguity",
+        (
+            "The public relationship can remain observable while independent program "
+            "activity is absent or no longer relevant"
+        ),
+        "84848484-8484-4484-8484-848484848481",
+        "39393939-3939-4393-8393-393939393939",
+        [upstream_hypothesis_id, downstream_hypothesis_id],
+        [
+            {
+                "id": "93939393-9393-4393-8393-939393939391",
+                "name": "Independent activity verification",
+                "observer_frame_id": independent_frame_id,
+                "observation_type": "independent_record.program_activity",
+                "question": (
+                    "Does an authorized independent artifact show current program activity?"
+                ),
+                "declared_blind_region_targets": ["No independent operational verification"],
+                "expected_outcomes": [
+                    {
+                        "label": "Independent activity artifact observed",
+                        "hypothesis_effects": [
+                            {
+                                "hypothesis_id": upstream_hypothesis_id,
+                                "effect": "NO_EFFECT",
+                            },
+                            {
+                                "hypothesis_id": downstream_hypothesis_id,
+                                "effect": "SUPPORTS_HYPOTHESIS",
+                            },
+                        ],
+                    },
+                    {
+                        "label": "Independent activity artifact absent",
+                        "hypothesis_effects": [
+                            {
+                                "hypothesis_id": upstream_hypothesis_id,
+                                "effect": "NO_EFFECT",
+                            },
+                            {
+                                "hypothesis_id": downstream_hypothesis_id,
+                                "effect": "CHALLENGES_HYPOTHESIS",
+                            },
+                        ],
+                    },
+                ],
+                "effort": "MEDIUM",
+            },
+            {
+                "id": "93939393-9393-4393-8393-939393939392",
+                "name": "Public relationship follow-up",
+                "observer_frame_id": "22222222-2222-4222-8222-222222222222",
+                "observation_type": "public_record.relationship_follow_up",
+                "question": "Does the public record still repeat the reported relationship?",
+                "expected_outcomes": [
+                    {
+                        "label": "Relationship reiterated",
+                        "hypothesis_effects": [
+                            {
+                                "hypothesis_id": upstream_hypothesis_id,
+                                "effect": "SUPPORTS_HYPOTHESIS",
+                            },
+                            {
+                                "hypothesis_id": downstream_hypothesis_id,
+                                "effect": "SUPPORTS_HYPOTHESIS",
+                            },
+                        ],
+                    },
+                    {
+                        "label": "Relationship withdrawn",
+                        "hypothesis_effects": [
+                            {
+                                "hypothesis_id": upstream_hypothesis_id,
+                                "effect": "CHALLENGES_HYPOTHESIS",
+                            },
+                            {
+                                "hypothesis_id": downstream_hypothesis_id,
+                                "effect": "CHALLENGES_HYPOTHESIS",
+                            },
+                        ],
+                    },
+                ],
+                "effort": "LOW",
+            },
+        ],
+        plan_id="92929292-9292-4292-8292-929292929291",
+        event_id="92929292-9292-4292-8292-929292929292",
+        occurred_at="2026-08-21T12:00:36Z",
+    )
+    projection.apply(plan_event)
+    events.append(plan_event)
+
+    events.append(
+        execute_discrimination_plan(
+            projection,
+            "92929292-9292-4292-8292-929292929291",
+            run_id="94949494-9494-4494-8494-949494949491",
+            receipt_id="94949494-9494-4494-8494-949494949492",
+            event_id="94949494-9494-4494-8494-949494949493",
+            occurred_at="2026-08-21T12:00:37Z",
+        )
+    )
     return events

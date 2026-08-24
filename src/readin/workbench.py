@@ -1,4 +1,4 @@
-"""Read-only Phase 6 workbench projection and loopback HTTP server."""
+"""Read-only Phase 6 workbench with bounded Phase 7 observation planning."""
 
 from __future__ import annotations
 
@@ -212,6 +212,47 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             }
         )
 
+    discrimination = None
+    if view["discrimination_plans"]:
+        item = view["discrimination_plans"][-1]
+        plan = item["plan"]
+        run = item["run"]
+        candidate_by_id = {candidate["id"]: candidate for candidate in plan["candidates"]}
+        scores = run["candidate_scores"] if run is not None else []
+        discrimination = {
+            "id": plan["id"],
+            "name": plan["name"],
+            "ambiguity_statement": plan["ambiguity_statement"],
+            "recommendation_state": (
+                run["recommendation_state"] if run is not None else "NOT_EVALUATED"
+            ),
+            "top_candidate_ids": deepcopy(run["top_candidate_ids"] if run else []),
+            "collection_state": item["collection_state"],
+            "acquisition_state": item["acquisition_state"],
+            "source_independence_state": item["source_independence_state"],
+            "expected_information_gain_state": item["expected_information_gain_state"],
+            "probability_state": item["probability_state"],
+            "ranking_interpretation": (
+                "STRUCTURAL_ORDINAL_HEURISTIC_NOT_EXPECTED_INFORMATION_GAIN"
+            ),
+            "candidates": [
+                {
+                    **deepcopy(score),
+                    "name": candidate_by_id[score["candidate_id"]]["name"],
+                    "question": candidate_by_id[score["candidate_id"]]["question"],
+                    "observation_type": candidate_by_id[score["candidate_id"]]["observation_type"],
+                    "effort": candidate_by_id[score["candidate_id"]]["effort"],
+                    "observer_frame_name": projection.frames[
+                        candidate_by_id[score["candidate_id"]]["observer_frame_id"]
+                    ]["name"],
+                    "blind_region_targets": deepcopy(
+                        candidate_by_id[score["candidate_id"]]["declared_blind_region_targets"]
+                    ),
+                }
+                for score in scores
+            ],
+        }
+
     timeline = projection.timeline_view(entity_id)["entries"]
     return {
         "identity": {
@@ -237,6 +278,7 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "resolution_candidates": len(view["resolution_candidates"]),
             "hypotheses": len(hypotheses),
             "scenarios": len(scenarios),
+            "discrimination_plans": len(view["discrimination_plans"]),
             "timeline_events": len(timeline),
         },
         "observer_frames": frames,
@@ -292,6 +334,7 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
         "fitters": {"latest_run": latest_fitter},
         "belief": {"latest_revision": latest_revision, "hypotheses": hypotheses},
         "scenarios": scenarios,
+        "collection": {"latest_discrimination": discrimination},
         "timeline": [
             {
                 "event_id": item["event_id"],
@@ -336,6 +379,9 @@ def build_workbench_snapshot(
             "trajectory_state": "NOT_SIMULATED",
             "empirical_validity_state": "NOT_ESTABLISHED",
             "consensus_state": "NOT_COMPUTED",
+            "collection_state": "NOT_STARTED",
+            "acquisition_state": "NOT_ATTEMPTED",
+            "source_independence_state": "NOT_ESTABLISHED",
         },
         "catalog": catalog,
         "selected_asset": (
