@@ -13,6 +13,8 @@ from readin.synthetic import (
     phase3_events,
     phase4_events,
     phase5_events,
+    phase7_events,
+    phase8_events,
 )
 
 
@@ -119,6 +121,79 @@ def test_phase5_contract_rejects_probability_and_prediction_promotion() -> None:
     scenario_event["payload"]["scenario"]["prediction_state"] = "FORECAST"
     with pytest.raises(ContractViolation, match="NOT_REQUESTED"):
         validate_event(scenario_event)
+
+
+def test_synthetic_phase7_events_conform_without_collection_authority() -> None:
+    events = phase7_events()
+    assert len(events) == 40
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    plan = events[38]["payload"]["discrimination_plan"]
+    run = events[39]["payload"]["discrimination_run"]
+    assert plan["collection_state"] == "NOT_STARTED"
+    assert plan["policy_context"]["collection_authority"] == "NOT_GRANTED"
+    assert run["acquisition_state"] == "NOT_ATTEMPTED"
+    assert run["expected_information_gain_state"] == "NOT_COMPUTED"
+    assert run["execution_receipt"]["network_access"] is False
+
+
+def test_phase7_contract_rejects_collection_and_probability_promotion() -> None:
+    plan_event = deepcopy(phase7_events()[38])
+    plan_event["payload"]["discrimination_plan"]["collection_state"] = "STARTED"
+    with pytest.raises(ContractViolation, match="NOT_STARTED"):
+        validate_event(plan_event)
+
+    run_event = deepcopy(phase7_events()[39])
+    run_event["payload"]["discrimination_run"]["probability_state"] = "COMPUTED"
+    with pytest.raises(ContractViolation, match="NOT_COMPUTED"):
+        validate_event(run_event)
+
+
+def test_synthetic_phase8_events_conform_without_residual_or_learning_promotion() -> None:
+    events = phase8_events()
+    assert len(events) == 44
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    design = events[40]["payload"]["forecast_evaluation_design"]
+    assert design["preregistration_state"] == "RECORDED_BEFORE_FORECAST_ORIGIN"
+    assert design["fitter_selection_state"] == "NOT_SELECTED"
+    assert design["forecast_execution_state"] == "NOT_STARTED"
+    assert design["prediction_state"] == "NOT_PRODUCED"
+
+    readback = events[43]["payload"]["residual_readback"]
+    assert readback["baseline_eligibility_state"] == "INELIGIBLE_NO_FORECAST_BASELINE"
+    assert readback["residual_state"] == "NOT_COMPUTED"
+    assert readback["validity_update_state"] == "NOT_APPLIED"
+    assert readback["learning_state"] == "NOT_STARTED"
+    assert readback["execution_receipt"]["network_access"] is False
+
+
+def test_phase8_contract_rejects_residual_and_validity_promotion() -> None:
+    forecast_event = deepcopy(phase8_events()[40])
+    forecast_event["payload"]["forecast_evaluation_design"]["prediction_state"] = "PRODUCED"
+    with pytest.raises(ContractViolation, match="NOT_PRODUCED"):
+        validate_event(forecast_event)
+
+    leakage_event = deepcopy(phase8_events()[40])
+    leakage_event["payload"]["forecast_evaluation_design"]["timing"]["post_cutoff_input_policy"] = (
+        "INCLUDE"
+    )
+    with pytest.raises(ContractViolation, match="EXCLUDE"):
+        validate_event(leakage_event)
+
+    residual_event = deepcopy(phase8_events()[43])
+    residual_event["payload"]["residual_readback"]["residual_state"] = "COMPUTED"
+    with pytest.raises(ContractViolation, match="NOT_COMPUTED"):
+        validate_event(residual_event)
+
+    validity_event = deepcopy(phase8_events()[43])
+    validity_event["payload"]["residual_readback"]["validity_update_state"] = "APPLIED"
+    with pytest.raises(ContractViolation, match="NOT_APPLIED"):
+        validate_event(validity_event)
 
 
 def test_closed_event_rejects_unknown_field() -> None:

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.readin.dev/v0.1/readin-event.schema.json",
   "title": "READIN Event v0.1",
-  "description": "Closed event envelope for the READIN Phase 0 through Phase 5 local ledger.",
+  "description": "Closed event envelope for the READIN Phase 0 through Phase 8B local ledger.",
   "type": "object",
   "required": [
     "schema_version",
@@ -36,7 +36,11 @@
         "belief.edge_created",
         "belief.revision_completed",
         "scenario.created",
-        "scenario.run_completed"
+        "scenario.run_completed",
+        "collection.discrimination_plan_created",
+        "collection.discrimination_run_completed",
+        "forecast.evaluation_design_created",
+        "residual.readback_completed"
       ]
     },
     "occurred_at": { "$ref": "#/$defs/timestamp" },
@@ -249,6 +253,54 @@
       "then": {
         "properties": {
           "payload": { "$ref": "#/$defs/scenarioRunCompletedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": { "const": "collection.discrimination_plan_created" }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/discriminationPlanCreatedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": { "const": "collection.discrimination_run_completed" }
+        },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/discriminationRunCompletedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "forecast.evaluation_design_created" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/forecastEvaluationDesignCreatedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "residual.readback_completed" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/residualReadbackCompletedPayload" }
         }
       }
     }
@@ -2249,6 +2301,538 @@
       "required": ["scenario_run"],
       "properties": {
         "scenario_run": { "$ref": "#/$defs/scenarioRun" }
+      },
+      "additionalProperties": false
+    },
+    "discriminationHypothesisEffect": {
+      "type": "object",
+      "required": ["hypothesis_id", "effect"],
+      "properties": {
+        "hypothesis_id": { "$ref": "#/$defs/uuid" },
+        "effect": {
+          "enum": [
+            "SUPPORTS_HYPOTHESIS",
+            "CHALLENGES_HYPOTHESIS",
+            "NO_EFFECT",
+            "UNKNOWN_EFFECT"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "discriminationExpectedOutcome": {
+      "type": "object",
+      "required": ["label", "hypothesis_effects", "assumption_state"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "hypothesis_effects": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/discriminationHypothesisEffect" },
+          "uniqueItems": true
+        },
+        "assumption_state": { "const": "USER_SUPPLIED_NOT_VALIDATED" }
+      },
+      "additionalProperties": false
+    },
+    "discriminationCandidate": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "observer_frame_id",
+        "observation_type",
+        "question",
+        "declared_blind_region_targets",
+        "expected_outcomes",
+        "effort",
+        "access_scope_snapshot",
+        "feasibility_state",
+        "source_independence_state",
+        "acquisition_state",
+        "target_hypothesis_ids"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "observer_frame_id": { "$ref": "#/$defs/uuid" },
+        "observation_type": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "question": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "declared_blind_region_targets": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "uniqueItems": true
+        },
+        "expected_outcomes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/discriminationExpectedOutcome" },
+          "uniqueItems": true
+        },
+        "effort": { "enum": ["LOW", "MEDIUM", "HIGH", "NOT_EVALUATED"] },
+        "access_scope_snapshot": { "$ref": "#/$defs/accessPolicy" },
+        "feasibility_state": { "const": "USER_SUPPLIED_NOT_VALIDATED" },
+        "source_independence_state": { "const": "NOT_ESTABLISHED" },
+        "acquisition_state": { "const": "NOT_STARTED" },
+        "target_hypothesis_ids": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "discriminationPolicyContext": {
+      "type": "object",
+      "required": ["source_policy", "human_entity_policy", "collection_authority"],
+      "properties": {
+        "source_policy": { "const": "PUBLIC_LICENSED_OWNED_OR_AUTHORIZED_ONLY" },
+        "human_entity_policy": { "const": "AUTHORIZED_SOURCES_ONLY" },
+        "collection_authority": { "const": "NOT_GRANTED" }
+      },
+      "additionalProperties": false
+    },
+    "discriminationPlan": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "name",
+        "ambiguity_statement",
+        "initial_state_version",
+        "belief_revision_id",
+        "query_plan_id",
+        "target_hypothesis_ids",
+        "candidates",
+        "ranking_policy",
+        "policy_context",
+        "collection_state",
+        "execution_state",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "ambiguity_statement": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "initial_state_version": { "$ref": "#/$defs/uuid" },
+        "belief_revision_id": { "$ref": "#/$defs/uuid" },
+        "query_plan_id": { "$ref": "#/$defs/uuid" },
+        "target_hypothesis_ids": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/discriminationCandidate" },
+          "uniqueItems": true
+        },
+        "ranking_policy": { "const": "STRUCTURAL_DISCRIMINATION_ORDINAL_V0_1" },
+        "policy_context": { "$ref": "#/$defs/discriminationPolicyContext" },
+        "collection_state": { "const": "NOT_STARTED" },
+        "execution_state": { "const": "PLANNED_LOCAL_ONLY" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "discriminationPlanCreatedPayload": {
+      "type": "object",
+      "required": ["discrimination_plan"],
+      "properties": {
+        "discrimination_plan": { "$ref": "#/$defs/discriminationPlan" }
+      },
+      "additionalProperties": false
+    },
+    "discriminationCandidateScore": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "rank",
+        "tie_state",
+        "discrimination_state",
+        "directional_separation_units",
+        "distinguished_hypothesis_pair_units",
+        "discriminating_outcome_count",
+        "blind_region_alignment_count",
+        "source_independence_state",
+        "feasibility_state",
+        "acquisition_state",
+        "interpretation"
+      ],
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/uuid" },
+        "rank": {
+          "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }]
+        },
+        "tie_state": { "enum": ["UNIQUE_AT_RANK", "TIED_AT_RANK", "NOT_RANKED"] },
+        "discrimination_state": { "enum": ["DISCRIMINATING", "NON_DISCRIMINATING"] },
+        "directional_separation_units": { "type": "integer", "minimum": 0 },
+        "distinguished_hypothesis_pair_units": { "type": "integer", "minimum": 0 },
+        "discriminating_outcome_count": { "type": "integer", "minimum": 0 },
+        "blind_region_alignment_count": { "type": "integer", "minimum": 0 },
+        "source_independence_state": { "const": "NOT_ESTABLISHED" },
+        "feasibility_state": { "const": "USER_SUPPLIED_NOT_VALIDATED" },
+        "acquisition_state": { "const": "NOT_STARTED" },
+        "interpretation": {
+          "const": "STRUCTURAL_ORDINAL_HEURISTIC_NOT_EXPECTED_INFORMATION_GAIN"
+        }
+      },
+      "additionalProperties": false
+    },
+    "discriminationExecutionReceipt": {
+      "type": "object",
+      "required": [
+        "id",
+        "plan_id",
+        "asset_entity_id",
+        "asset_state_version",
+        "plan_sha256",
+        "belief_revision_id",
+        "belief_revision_sha256",
+        "query_plan_id",
+        "query_result_sha256",
+        "candidate_ids",
+        "target_hypothesis_ids",
+        "algorithm_id",
+        "implementation_sha256",
+        "outcome_sha256",
+        "runtime",
+        "network_access",
+        "collection_state",
+        "source_independence_state",
+        "executed_at",
+        "authority_state"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "plan_id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "asset_state_version": { "$ref": "#/$defs/uuid" },
+        "plan_sha256": { "$ref": "#/$defs/sha256" },
+        "belief_revision_id": { "$ref": "#/$defs/uuid" },
+        "belief_revision_sha256": { "$ref": "#/$defs/sha256" },
+        "query_plan_id": { "$ref": "#/$defs/uuid" },
+        "query_result_sha256": { "$ref": "#/$defs/sha256" },
+        "candidate_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "target_hypothesis_ids": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "algorithm_id": {
+          "const": "readin.reference.collection.structural-discrimination-ordinal.v0.1"
+        },
+        "implementation_sha256": { "$ref": "#/$defs/sha256" },
+        "outcome_sha256": { "$ref": "#/$defs/sha256" },
+        "runtime": { "const": "LOCAL_DETERMINISTIC_REFERENCE" },
+        "network_access": { "const": false },
+        "collection_state": { "const": "NOT_STARTED" },
+        "source_independence_state": { "const": "NOT_ESTABLISHED" },
+        "executed_at": { "$ref": "#/$defs/timestamp" },
+        "authority_state": { "const": "NO_AUTHORITY" }
+      },
+      "additionalProperties": false
+    },
+    "discriminationRun": {
+      "type": "object",
+      "required": [
+        "id",
+        "plan_id",
+        "asset_entity_id",
+        "recommendation_state",
+        "candidate_scores",
+        "top_candidate_ids",
+        "ranking_policy",
+        "collection_state",
+        "acquisition_state",
+        "expected_information_gain_state",
+        "probability_state",
+        "empirical_validity_state",
+        "execution_receipt",
+        "recorded_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "plan_id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "recommendation_state": {
+          "enum": [
+            "RANKED_STRUCTURAL_CANDIDATES",
+            "ABSTAINED_NO_DISCRIMINATING_CANDIDATE"
+          ]
+        },
+        "candidate_scores": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/discriminationCandidateScore" },
+          "uniqueItems": true
+        },
+        "top_candidate_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "ranking_policy": { "const": "STRUCTURAL_DISCRIMINATION_ORDINAL_V0_1" },
+        "collection_state": { "const": "NOT_STARTED" },
+        "acquisition_state": { "const": "NOT_ATTEMPTED" },
+        "expected_information_gain_state": { "const": "NOT_COMPUTED" },
+        "probability_state": { "const": "NOT_COMPUTED" },
+        "empirical_validity_state": { "const": "NOT_ESTABLISHED" },
+        "execution_receipt": { "$ref": "#/$defs/discriminationExecutionReceipt" },
+        "recorded_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "discriminationRunCompletedPayload": {
+      "type": "object",
+      "required": ["discrimination_run"],
+      "properties": {
+        "discrimination_run": { "$ref": "#/$defs/discriminationRun" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationTarget": {
+      "type": "object",
+      "required": [
+        "observation_type",
+        "structured_field_path",
+        "value_kind",
+        "unit",
+        "target_semantics"
+      ],
+      "properties": {
+        "observation_type": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "structured_field_path": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "value_kind": { "const": "NUMBER" },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "target_semantics": { "const": "USER_DECLARED_NOT_VALIDATED" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationMetric": {
+      "type": "object",
+      "required": ["name", "residual_definition", "direction", "metric_state"],
+      "properties": {
+        "name": { "const": "ABSOLUTE_ERROR" },
+        "residual_definition": { "const": "OBSERVED_MINUS_PREDICTED" },
+        "direction": { "const": "LOWER_IS_BETTER" },
+        "metric_state": { "const": "PREDECLARED_NOT_VALIDATED" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationTiming": {
+      "type": "object",
+      "required": [
+        "training_cutoff",
+        "forecast_origin",
+        "horizon_end",
+        "leakage_basis",
+        "post_cutoff_input_policy",
+        "readback_observation_policy"
+      ],
+      "properties": {
+        "training_cutoff": { "$ref": "#/$defs/timestamp" },
+        "forecast_origin": { "$ref": "#/$defs/timestamp" },
+        "horizon_end": { "$ref": "#/$defs/timestamp" },
+        "leakage_basis": { "const": "LEDGER_RECORDED_AT" },
+        "post_cutoff_input_policy": { "const": "EXCLUDE" },
+        "readback_observation_policy": { "const": "STRICTLY_AFTER_HORIZON" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationDesign": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "scenario_id",
+        "name",
+        "initial_state_version",
+        "target",
+        "metric",
+        "timing",
+        "preregistration_state",
+        "fitter_selection_state",
+        "forecast_execution_state",
+        "prediction_state",
+        "calibration_state",
+        "empirical_validity_state",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "scenario_id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "initial_state_version": { "$ref": "#/$defs/uuid" },
+        "target": { "$ref": "#/$defs/forecastEvaluationTarget" },
+        "metric": { "$ref": "#/$defs/forecastEvaluationMetric" },
+        "timing": { "$ref": "#/$defs/forecastEvaluationTiming" },
+        "preregistration_state": { "const": "RECORDED_BEFORE_FORECAST_ORIGIN" },
+        "fitter_selection_state": { "const": "NOT_SELECTED" },
+        "forecast_execution_state": { "const": "NOT_STARTED" },
+        "prediction_state": { "const": "NOT_PRODUCED" },
+        "calibration_state": { "const": "NOT_ESTABLISHED" },
+        "empirical_validity_state": { "const": "NOT_ESTABLISHED" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationDesignCreatedPayload": {
+      "type": "object",
+      "required": ["forecast_evaluation_design"],
+      "properties": {
+        "forecast_evaluation_design": { "$ref": "#/$defs/forecastEvaluationDesign" }
+      },
+      "additionalProperties": false
+    },
+    "residualReadbackExecutionReceipt": {
+      "type": "object",
+      "required": [
+        "id",
+        "readback_id",
+        "asset_entity_id",
+        "asset_state_version",
+        "scenario_run_id",
+        "forecast_evaluation_design_id",
+        "forecast_evaluation_design_sha256",
+        "scenario_run_sha256",
+        "scenario_sha256",
+        "observation_ids",
+        "source_artifact_ids",
+        "observer_frame_ids",
+        "observation_snapshot_sha256",
+        "algorithm_id",
+        "implementation_sha256",
+        "outcome_sha256",
+        "runtime",
+        "network_access",
+        "executed_at",
+        "authority_state"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "readback_id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "asset_state_version": { "$ref": "#/$defs/uuid" },
+        "scenario_run_id": { "$ref": "#/$defs/uuid" },
+        "forecast_evaluation_design_id": { "$ref": "#/$defs/uuid" },
+        "forecast_evaluation_design_sha256": { "$ref": "#/$defs/sha256" },
+        "scenario_run_sha256": { "$ref": "#/$defs/sha256" },
+        "scenario_sha256": { "$ref": "#/$defs/sha256" },
+        "observation_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "source_artifact_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "observer_frame_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "observation_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "algorithm_id": {
+          "const": "readin.reference.residual.forecast-eligibility-gate.v0.1"
+        },
+        "implementation_sha256": { "$ref": "#/$defs/sha256" },
+        "outcome_sha256": { "$ref": "#/$defs/sha256" },
+        "runtime": { "const": "LOCAL_DETERMINISTIC_REFERENCE" },
+        "network_access": { "const": false },
+        "executed_at": { "$ref": "#/$defs/timestamp" },
+        "authority_state": { "const": "NO_AUTHORITY" }
+      },
+      "additionalProperties": false
+    },
+    "residualReadback": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "scenario_run_id",
+        "observation_ids",
+        "temporal_order_state",
+        "baseline_eligibility_state",
+        "reference_prediction_state",
+        "residual_state",
+        "residual_value",
+        "validity_update_state",
+        "weighting_update_state",
+        "future_admissibility_update_state",
+        "learning_state",
+        "interpretation",
+        "execution_receipt",
+        "recorded_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "scenario_run_id": { "$ref": "#/$defs/uuid" },
+        "observation_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "temporal_order_state": {
+          "const": "LATER_THAN_SCENARIO_HORIZON_CONFIRMED"
+        },
+        "baseline_eligibility_state": {
+          "const": "INELIGIBLE_NO_FORECAST_BASELINE"
+        },
+        "reference_prediction_state": { "const": "NOT_REQUESTED" },
+        "residual_state": { "const": "NOT_COMPUTED" },
+        "residual_value": { "type": "null" },
+        "validity_update_state": { "const": "NOT_APPLIED" },
+        "weighting_update_state": { "const": "NOT_APPLIED" },
+        "future_admissibility_update_state": { "const": "NOT_APPLIED" },
+        "learning_state": { "const": "NOT_STARTED" },
+        "interpretation": {
+          "const": "READBACK_RETAINED_WITHOUT_FORECAST_RESIDUAL"
+        },
+        "execution_receipt": { "$ref": "#/$defs/residualReadbackExecutionReceipt" },
+        "recorded_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "residualReadbackCompletedPayload": {
+      "type": "object",
+      "required": ["residual_readback"],
+      "properties": {
+        "residual_readback": { "$ref": "#/$defs/residualReadback" }
       },
       "additionalProperties": false
     }

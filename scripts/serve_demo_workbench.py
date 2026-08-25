@@ -1,11 +1,11 @@
-"""Serve the bounded Phase 6 workbench over a temporary synthetic ledger."""
+"""Serve the bounded workbench with a synthetic Phase 8B forecast-design fixture."""
 
 from __future__ import annotations
 
 from tempfile import TemporaryDirectory
 
 from readin.store import EventLedger
-from readin.synthetic import phase5_events
+from readin.synthetic import phase8_events
 from readin.workbench import serve_workbench
 
 
@@ -13,7 +13,7 @@ def main() -> None:
     with TemporaryDirectory(prefix="readin-workbench-") as directory:
         ledger = EventLedger(f"{directory}/events.jsonl")
         ledger.initialize()
-        for event in phase5_events():
+        for event in phase8_events():
             ledger.append(event)
         serve_workbench(ledger.path)
 

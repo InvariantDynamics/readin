@@ -1,9 +1,9 @@
-"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 5 ledger."""
+"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 8B ledger."""
 
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from readin.belief import (
@@ -14,6 +14,13 @@ from readin.belief import (
     compute_belief_components,
 )
 from readin.contracts import validate_event
+from readin.discrimination import (
+    DISCRIMINATION_ALGORITHM_ID,
+    DiscriminationRuntimeError,
+    build_discrimination_snapshot,
+    compute_discrimination_components,
+    discrimination_implementation_sha256,
+)
 from readin.fitters import (
     FitterRuntimeError,
     canonical_sha256,
@@ -21,6 +28,13 @@ from readin.fitters import (
     reference_fit_components,
     reference_fitter_spec,
     validate_reference_descriptor,
+)
+from readin.residuals import (
+    RESIDUAL_ALGORITHM_ID,
+    ResidualRuntimeError,
+    build_residual_snapshot,
+    compute_residual_components,
+    residual_implementation_sha256,
 )
 from readin.scenarios import (
     SCENARIO_ALGORITHM_ID,
@@ -63,6 +77,12 @@ class ReadinProjection:
         self.scenarios: dict[str, dict[str, Any]] = {}
         self.scenario_runs: dict[str, dict[str, Any]] = {}
         self.scenario_receipts: dict[str, dict[str, Any]] = {}
+        self.discrimination_plans: dict[str, dict[str, Any]] = {}
+        self.discrimination_runs: dict[str, dict[str, Any]] = {}
+        self.discrimination_receipts: dict[str, dict[str, Any]] = {}
+        self.forecast_evaluation_designs: dict[str, dict[str, Any]] = {}
+        self.residual_readbacks: dict[str, dict[str, Any]] = {}
+        self.residual_receipts: dict[str, dict[str, Any]] = {}
         self.asset_versions: dict[str, list[dict[str, Any]]] = {}
         self.event_ids: set[str] = set()
         self._evidence_digests: dict[str, str] = {}
@@ -79,6 +99,9 @@ class ReadinProjection:
         self._belief_edge_pairs: set[tuple[str, str]] = set()
         self._latest_belief_revision: dict[str, str] = {}
         self._latest_scenario_run: dict[str, str] = {}
+        self._latest_discrimination_run: dict[str, str] = {}
+        self._scenario_forecast_evaluation_design: dict[str, str] = {}
+        self._scenario_readback: dict[str, str] = {}
         self._events: list[dict[str, Any]] = []
 
     @classmethod
@@ -791,6 +814,268 @@ class ReadinProjection:
         self._latest_scenario_run[scenario_id] = run_id
         self._advance_asset(asset_id, event)
 
+    def _apply_collection_discrimination_plan_created(self, event: dict[str, Any]) -> None:
+        plan = deepcopy(event["payload"]["discrimination_plan"])
+        plan_id = plan["id"]
+        if plan_id in self.discrimination_plans:
+            raise ProjectionError(f"duplicate discrimination plan id: {plan_id}")
+        asset_id = plan["asset_entity_id"]
+        if asset_id not in self.assets:
+            raise ProjectionError(f"discrimination plan references unknown asset: {asset_id}")
+        if plan["initial_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("discrimination plan initial state version mismatch")
+
+        revision_id = plan["belief_revision_id"]
+        if revision_id not in self.belief_revisions:
+            raise ProjectionError(
+                f"discrimination plan references unknown belief revision: {revision_id}"
+            )
+        revision = self.belief_revisions[revision_id]
+        if revision["asset_entity_id"] != asset_id:
+            raise ProjectionError("discrimination belief revision belongs to another asset")
+        query_id = plan["query_plan_id"]
+        if query_id not in self.cartographic_query_plans:
+            raise ProjectionError(
+                f"discrimination plan references unknown cartographic query: {query_id}"
+            )
+        if self.cartographic_query_plans[query_id]["asset_entity_id"] != asset_id:
+            raise ProjectionError("discrimination query belongs to another asset")
+
+        target_ids = plan["target_hypothesis_ids"]
+        if target_ids != sorted(target_ids) or len(target_ids) != len(set(target_ids)):
+            raise ProjectionError("discrimination target hypothesis ids must be unique and sorted")
+        unknown_hypotheses = sorted(set(target_ids) - self.hypotheses.keys())
+        if unknown_hypotheses:
+            raise ProjectionError(
+                f"discrimination plan references unknown hypotheses: {unknown_hypotheses}"
+            )
+        if any(self.hypotheses[item]["asset_entity_id"] != asset_id for item in target_ids):
+            raise ProjectionError("discrimination hypotheses belong to another asset")
+        revision_hypothesis_ids = {item["hypothesis_id"] for item in revision["node_results"]}
+        if not set(target_ids).issubset(revision_hypothesis_ids):
+            raise ProjectionError("discrimination hypotheses are absent from the bound revision")
+
+        known_blind_regions = set(
+            self.execute_cartographic_query(query_id)["blind_regions"]["known"]
+        )
+        candidate_ids: set[str] = set()
+        candidate_keys: set[tuple[str, str, str]] = set()
+        for candidate in plan["candidates"]:
+            candidate_id = candidate["id"]
+            if candidate_id in candidate_ids:
+                raise ProjectionError(f"duplicate discrimination candidate id: {candidate_id}")
+            candidate_ids.add(candidate_id)
+            if candidate["target_hypothesis_ids"] != target_ids:
+                raise ProjectionError("candidate target hypotheses do not match plan")
+            frame_id = candidate["observer_frame_id"]
+            if frame_id not in self.frames:
+                raise ProjectionError(f"candidate references unknown observer frame: {frame_id}")
+            if (
+                candidate["access_scope_snapshot"]
+                != self.frames[frame_id]["access_projection"]["scope"]
+            ):
+                raise ProjectionError("candidate observer-frame access snapshot mismatch")
+            candidate_key = (
+                frame_id,
+                candidate["observation_type"],
+                candidate["question"],
+            )
+            if candidate_key in candidate_keys:
+                raise ProjectionError("duplicate discrimination candidate semantic key")
+            candidate_keys.add(candidate_key)
+            invalid_blind_targets = sorted(
+                set(candidate["declared_blind_region_targets"]) - known_blind_regions
+            )
+            if invalid_blind_targets:
+                raise ProjectionError(
+                    f"candidate targets unknown query blind regions: {invalid_blind_targets}"
+                )
+            outcome_labels: set[str] = set()
+            for outcome in candidate["expected_outcomes"]:
+                if outcome["label"] in outcome_labels:
+                    raise ProjectionError("candidate expected-outcome labels must be unique")
+                outcome_labels.add(outcome["label"])
+                effect_ids = [item["hypothesis_id"] for item in outcome["hypothesis_effects"]]
+                if effect_ids != target_ids:
+                    raise ProjectionError(
+                        "candidate outcome effects must cover every target hypothesis "
+                        "in sorted order"
+                    )
+
+        self.discrimination_plans[plan_id] = plan
+        self._advance_asset(asset_id, event)
+
+    def _apply_collection_discrimination_run_completed(self, event: dict[str, Any]) -> None:
+        run = deepcopy(event["payload"]["discrimination_run"])
+        run_id = run["id"]
+        receipt = run["execution_receipt"]
+        receipt_id = receipt["id"]
+        if run_id in self.discrimination_runs:
+            raise ProjectionError(f"duplicate discrimination run id: {run_id}")
+        if receipt_id in self.discrimination_receipts:
+            raise ProjectionError(f"duplicate discrimination receipt id: {receipt_id}")
+        plan_id = run["plan_id"]
+        if plan_id not in self.discrimination_plans:
+            raise ProjectionError(f"discrimination run references unknown plan: {plan_id}")
+        if plan_id in self._latest_discrimination_run:
+            raise ProjectionError("bounded discrimination plan already has a completed run")
+        plan = self.discrimination_plans[plan_id]
+        asset_id = plan["asset_entity_id"]
+        if run["asset_entity_id"] != asset_id or receipt["asset_entity_id"] != asset_id:
+            raise ProjectionError("discrimination run asset binding mismatch")
+        if receipt["plan_id"] != plan_id:
+            raise ProjectionError("discrimination receipt plan binding mismatch")
+        if receipt["asset_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("discrimination receipt asset state version mismatch")
+        if not (run["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("discrimination execution times must match ledger-recorded time")
+
+        try:
+            snapshot = build_discrimination_snapshot(self, plan_id)
+            components = compute_discrimination_components(snapshot)
+        except DiscriminationRuntimeError as error:
+            raise ProjectionError(str(error)) from error
+        expected_receipt_fields = {
+            "plan_sha256": canonical_sha256(plan),
+            "belief_revision_id": plan["belief_revision_id"],
+            "belief_revision_sha256": canonical_sha256(snapshot["belief_revision"]),
+            "query_plan_id": plan["query_plan_id"],
+            "query_result_sha256": snapshot["query_context"]["query_result_sha256"],
+            "candidate_ids": sorted(item["id"] for item in plan["candidates"]),
+            "target_hypothesis_ids": plan["target_hypothesis_ids"],
+            "algorithm_id": DISCRIMINATION_ALGORITHM_ID,
+            "implementation_sha256": discrimination_implementation_sha256(),
+            "outcome_sha256": canonical_sha256(components),
+        }
+        mismatched = [
+            key for key, expected in expected_receipt_fields.items() if receipt[key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"discrimination receipt binding mismatch: {mismatched}")
+        for key, expected in components.items():
+            if run[key] != expected:
+                raise ProjectionError(f"discrimination run {key} does not match reference ranking")
+
+        self.discrimination_runs[run_id] = run
+        self.discrimination_receipts[receipt_id] = receipt
+        self._latest_discrimination_run[plan_id] = run_id
+        self._advance_asset(asset_id, event)
+
+    def _apply_residual_readback_completed(self, event: dict[str, Any]) -> None:
+        readback = deepcopy(event["payload"]["residual_readback"])
+        readback_id = readback["id"]
+        receipt = readback["execution_receipt"]
+        receipt_id = receipt["id"]
+        if readback_id in self.residual_readbacks:
+            raise ProjectionError(f"duplicate residual readback id: {readback_id}")
+        if receipt_id in self.residual_receipts:
+            raise ProjectionError(f"duplicate residual receipt id: {receipt_id}")
+        scenario_run_id = readback["scenario_run_id"]
+        if scenario_run_id not in self.scenario_runs:
+            raise ProjectionError(
+                f"residual readback references unknown scenario run: {scenario_run_id}"
+            )
+        if scenario_run_id in self._scenario_readback:
+            raise ProjectionError("bounded scenario run already has a residual readback")
+        asset_id = self.scenario_runs[scenario_run_id]["asset_entity_id"]
+        if readback["asset_entity_id"] != asset_id or receipt["asset_entity_id"] != asset_id:
+            raise ProjectionError("residual readback asset binding mismatch")
+        if receipt["readback_id"] != readback_id:
+            raise ProjectionError("residual receipt readback binding mismatch")
+        if receipt["scenario_run_id"] != scenario_run_id:
+            raise ProjectionError("residual receipt scenario-run binding mismatch")
+        if receipt["asset_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("residual receipt asset state version mismatch")
+        if not (readback["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("residual readback times must match ledger-recorded time")
+        if readback["observation_ids"] != sorted(readback["observation_ids"]):
+            raise ProjectionError("residual readback observation ids must use sorted order")
+
+        try:
+            snapshot = build_residual_snapshot(
+                self,
+                scenario_run_id,
+                readback["observation_ids"],
+            )
+            components = compute_residual_components(snapshot)
+        except ResidualRuntimeError as error:
+            raise ProjectionError(str(error)) from error
+        expected_receipt_fields = {
+            "forecast_evaluation_design_id": snapshot["forecast_evaluation_design"]["id"],
+            "forecast_evaluation_design_sha256": canonical_sha256(
+                snapshot["forecast_evaluation_design"]
+            ),
+            "scenario_run_sha256": canonical_sha256(snapshot["scenario_run"]),
+            "scenario_sha256": canonical_sha256(snapshot["scenario"]),
+            "observation_ids": snapshot["observation_ids"],
+            "source_artifact_ids": snapshot["source_artifact_ids"],
+            "observer_frame_ids": snapshot["observer_frame_ids"],
+            "observation_snapshot_sha256": canonical_sha256(snapshot["observation_snapshot"]),
+            "algorithm_id": RESIDUAL_ALGORITHM_ID,
+            "implementation_sha256": residual_implementation_sha256(),
+            "outcome_sha256": canonical_sha256(components),
+        }
+        mismatched = [
+            key for key, expected in expected_receipt_fields.items() if receipt[key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"residual receipt binding mismatch: {mismatched}")
+        for key, expected in components.items():
+            if readback[key] != expected:
+                raise ProjectionError(
+                    f"residual readback {key} does not match reference eligibility gate"
+                )
+
+        self.residual_readbacks[readback_id] = readback
+        self.residual_receipts[receipt_id] = receipt
+        self._scenario_readback[scenario_run_id] = readback_id
+        self._advance_asset(asset_id, event)
+
+    def _apply_forecast_evaluation_design_created(self, event: dict[str, Any]) -> None:
+        design = deepcopy(event["payload"]["forecast_evaluation_design"])
+        design_id = design["id"]
+        if design_id in self.forecast_evaluation_designs:
+            raise ProjectionError(f"duplicate forecast evaluation design id: {design_id}")
+        scenario_id = design["scenario_id"]
+        if scenario_id not in self.scenarios:
+            raise ProjectionError(
+                f"forecast evaluation design references unknown scenario: {scenario_id}"
+            )
+        if scenario_id in self._scenario_forecast_evaluation_design:
+            raise ProjectionError("bounded scenario already has a forecast evaluation design")
+        scenario = self.scenarios[scenario_id]
+        asset_id = scenario["asset_entity_id"]
+        if design["asset_entity_id"] != asset_id:
+            raise ProjectionError("forecast evaluation design asset binding mismatch")
+        if design["initial_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("forecast evaluation design initial state version mismatch")
+        if design["created_at"] != event["occurred_at"]:
+            raise ProjectionError("forecast evaluation design time must match ledger-recorded time")
+
+        created_at = self._parse_timestamp(design["created_at"])
+        training_cutoff = self._parse_timestamp(design["timing"]["training_cutoff"])
+        forecast_origin = self._parse_timestamp(scenario["start_time"])
+        horizon_end = forecast_origin + timedelta(days=scenario["horizon_days"])
+        if training_cutoff > created_at:
+            raise ProjectionError("forecast training cutoff follows design creation")
+        if created_at >= forecast_origin:
+            raise ProjectionError(
+                "forecast evaluation design was not recorded before forecast origin"
+            )
+        expected_timing = {
+            "forecast_origin": forecast_origin.isoformat().replace("+00:00", "Z"),
+            "horizon_end": horizon_end.isoformat().replace("+00:00", "Z"),
+        }
+        mismatched = [
+            key for key, expected in expected_timing.items() if design["timing"][key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"forecast evaluation design timing mismatch: {mismatched}")
+
+        self.forecast_evaluation_designs[design_id] = design
+        self._scenario_forecast_evaluation_design[scenario_id] = design_id
+        self._advance_asset(asset_id, event)
+
     def _validate_fitter_receipt_identity(
         self,
         run: dict[str, Any],
@@ -1193,6 +1478,28 @@ class ReadinProjection:
             if scenario["asset_entity_id"] == entity_id
         ]
         scenarios.sort(key=lambda item: (item["scenario"]["created_at"], item["scenario"]["id"]))
+        discrimination_plans = [
+            self.discrimination_plan_view(plan_id)
+            for plan_id, plan in self.discrimination_plans.items()
+            if plan["asset_entity_id"] == entity_id
+        ]
+        discrimination_plans.sort(key=lambda item: (item["plan"]["created_at"], item["plan"]["id"]))
+        forecast_evaluation_designs = [
+            self.forecast_evaluation_design_view(design_id)
+            for design_id, design in self.forecast_evaluation_designs.items()
+            if design["asset_entity_id"] == entity_id
+        ]
+        forecast_evaluation_designs.sort(
+            key=lambda item: (item["design"]["created_at"], item["design"]["id"])
+        )
+        residual_readbacks = [
+            self.residual_readback_view(readback_id)
+            for readback_id, readback in self.residual_readbacks.items()
+            if readback["asset_entity_id"] == entity_id
+        ]
+        residual_readbacks.sort(
+            key=lambda item: (item["readback"]["recorded_at"], item["readback"]["id"])
+        )
         claim_ids = {item["claim"]["id"] for item in claims}
         links = [
             deepcopy(link) for link in self.evidence_links.values() if link["claim_id"] in claim_ids
@@ -1223,6 +1530,9 @@ class ReadinProjection:
             "hypotheses": hypotheses,
             "belief_revisions": belief_revisions,
             "scenarios": scenarios,
+            "discrimination_plans": discrimination_plans,
+            "forecast_evaluation_designs": forecast_evaluation_designs,
+            "residual_readbacks": residual_readbacks,
             "evidence_dependencies": dependencies,
             "observer_frames": [deepcopy(self.frames[item]) for item in frame_ids],
             "evidence_manifests": [deepcopy(self.evidence[item]) for item in artifact_ids],
@@ -1664,6 +1974,78 @@ class ReadinProjection:
             "authority_state": "NO_AUTHORITY",
         }
 
+    def discrimination_plan_view(self, plan_id: str) -> dict[str, Any]:
+        if plan_id not in self.discrimination_plans:
+            raise ProjectionError(f"unknown discrimination plan: {plan_id}")
+        run_id = self._latest_discrimination_run.get(plan_id)
+        return {
+            "plan": deepcopy(self.discrimination_plans[plan_id]),
+            "run": (deepcopy(self.discrimination_runs[run_id]) if run_id is not None else None),
+            "collection_state": "NOT_STARTED",
+            "acquisition_state": "NOT_ATTEMPTED",
+            "source_independence_state": "NOT_ESTABLISHED",
+            "expected_information_gain_state": "NOT_COMPUTED",
+            "probability_state": "NOT_COMPUTED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def discrimination_run_view(self, run_id: str) -> dict[str, Any]:
+        if run_id not in self.discrimination_runs:
+            raise ProjectionError(f"unknown discrimination run: {run_id}")
+        run = deepcopy(self.discrimination_runs[run_id])
+        return {
+            "run": run,
+            "plan": deepcopy(self.discrimination_plans[run["plan_id"]]),
+            "collection_state": "NOT_STARTED",
+            "acquisition_state": "NOT_ATTEMPTED",
+            "source_independence_state": "NOT_ESTABLISHED",
+            "expected_information_gain_state": "NOT_COMPUTED",
+            "probability_state": "NOT_COMPUTED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def residual_readback_view(self, readback_id: str) -> dict[str, Any]:
+        if readback_id not in self.residual_readbacks:
+            raise ProjectionError(f"unknown residual readback: {readback_id}")
+        readback = deepcopy(self.residual_readbacks[readback_id])
+        scenario_run = deepcopy(self.scenario_runs[readback["scenario_run_id"]])
+        return {
+            "readback": readback,
+            "scenario_run": scenario_run,
+            "scenario": deepcopy(self.scenarios[scenario_run["scenario_id"]]),
+            "forecast_evaluation_design": self.forecast_evaluation_design_view(
+                readback["execution_receipt"]["forecast_evaluation_design_id"]
+            )["design"],
+            "observations": [
+                deepcopy(self.observations[item]) for item in readback["observation_ids"]
+            ],
+            "forecast_baseline_state": "NOT_AVAILABLE",
+            "residual_state": "NOT_COMPUTED",
+            "validity_update_state": "NOT_APPLIED",
+            "weighting_update_state": "NOT_APPLIED",
+            "future_admissibility_update_state": "NOT_APPLIED",
+            "learning_state": "NOT_STARTED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def forecast_evaluation_design_view(self, design_id: str) -> dict[str, Any]:
+        if design_id not in self.forecast_evaluation_designs:
+            raise ProjectionError(f"unknown forecast evaluation design: {design_id}")
+        design = deepcopy(self.forecast_evaluation_designs[design_id])
+        scenario = deepcopy(self.scenarios[design["scenario_id"]])
+        run_id = self._latest_scenario_run.get(design["scenario_id"])
+        return {
+            "design": design,
+            "scenario": scenario,
+            "scenario_run": (deepcopy(self.scenario_runs[run_id]) if run_id is not None else None),
+            "forecast_capable_fitter_state": "NO_ELIGIBLE_FITTER_REGISTERED",
+            "eligible_fitter_ids": [],
+            "forecast_execution_state": "NOT_STARTED",
+            "prediction_state": "NOT_PRODUCED",
+            "calibration_state": "NOT_ESTABLISHED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
     def resolution_candidate_view(self, candidate_id: str) -> dict[str, Any]:
         if candidate_id not in self.resolution_candidates:
             raise ProjectionError(f"unknown resolution candidate: {candidate_id}")
@@ -1852,6 +2234,14 @@ class ReadinProjection:
             return {scenario["asset_entity_id"], *scenario["target_entity_ids"]}
         if event_type == "scenario.run_completed":
             return {payload["scenario_run"]["asset_entity_id"]}
+        if event_type == "collection.discrimination_plan_created":
+            return {payload["discrimination_plan"]["asset_entity_id"]}
+        if event_type == "collection.discrimination_run_completed":
+            return {payload["discrimination_run"]["asset_entity_id"]}
+        if event_type == "forecast.evaluation_design_created":
+            return {payload["forecast_evaluation_design"]["asset_entity_id"]}
+        if event_type == "residual.readback_completed":
+            return {payload["residual_readback"]["asset_entity_id"]}
         if event_type == "evidence.linked":
             claim_id = payload["evidence_link"]["claim_id"]
             return {self.claims[claim_id]["subject"]} if claim_id in self.claims else set()
@@ -1898,6 +2288,14 @@ class ReadinProjection:
             return event["payload"]["scenario"]["created_at"]
         if event_type == "scenario.run_completed":
             return event["payload"]["scenario_run"]["recorded_at"]
+        if event_type == "collection.discrimination_plan_created":
+            return event["payload"]["discrimination_plan"]["created_at"]
+        if event_type == "collection.discrimination_run_completed":
+            return event["payload"]["discrimination_run"]["recorded_at"]
+        if event_type == "forecast.evaluation_design_created":
+            return event["payload"]["forecast_evaluation_design"]["created_at"]
+        if event_type == "residual.readback_completed":
+            return event["payload"]["residual_readback"]["recorded_at"]
         return event["occurred_at"]
 
     def _parse_timestamp(self, value: str) -> datetime:
@@ -1947,6 +2345,21 @@ class ReadinProjection:
                 ),
                 "scenario_run_count": sum(
                     entity_id == run["asset_entity_id"] for run in self.scenario_runs.values()
+                ),
+                "discrimination_plan_count": sum(
+                    entity_id == plan["asset_entity_id"]
+                    for plan in self.discrimination_plans.values()
+                ),
+                "discrimination_run_count": sum(
+                    entity_id == run["asset_entity_id"] for run in self.discrimination_runs.values()
+                ),
+                "forecast_evaluation_design_count": sum(
+                    entity_id == design["asset_entity_id"]
+                    for design in self.forecast_evaluation_designs.values()
+                ),
+                "residual_readback_count": sum(
+                    entity_id == readback["asset_entity_id"]
+                    for readback in self.residual_readbacks.values()
                 ),
                 "authority_state": "NO_AUTHORITY",
             }

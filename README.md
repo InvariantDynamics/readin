@@ -29,8 +29,9 @@ contracts and receipts; it does not redefine OFS Core.
 
 ## Current executable slice
 
-The current foundation, bounded Array, resolution, cartography, multi-fitter, belief, scenario, and
-asset-workbench slices implement one local epistemic loop:
+The current foundation, bounded Array, resolution, cartography, multi-fitter, belief, scenario,
+asset-workbench, discriminating-observation, forecast-evaluation design, and residual-readback
+eligibility slices implement one local epistemic loop:
 
 1. Create a typed entity and start tracking it as an asset.
 2. Register an observer frame.
@@ -63,16 +64,41 @@ asset-workbench slices implement one local epistemic loop:
 24. Project the replayed ledger into a compact operator view that retains claim status, dependency
     ancestry, blind regions, fitter invalidity, categorical belief state, and unknown branches.
 25. Inspect that projection through a loopback-only, read-only browser workbench.
+26. Declare manual candidate observations against a specified ambiguity, belief revision, and
+    cartographic blind-region context.
+27. Rank only their user-supplied structural effects on competing hypotheses, preserving ties and
+    abstaining when no candidate discriminates.
+28. Inspect the result as a “Next observation” view without querying, acquiring, or contacting a
+    source.
+29. Predeclare one numeric forecast-evaluation target, metric, training cutoff, forecast origin, and
+    post-cutoff exclusion policy before the scenario horizon begins.
+30. Keep fitter selection `NOT_SELECTED`, forecast execution `NOT_STARTED`, and prediction
+    `NOT_PRODUCED` while no forecast-capable fitter exists.
+31. Admit a later, manual observation and bind it to the predeclared target and earlier scenario run.
+32. Verify that the observation is strictly later than the scenario horizon and that the run has no
+    forecast baseline.
+33. Retain a digest-bound readback abstention with no residual, fitter-validity, weighting, future
+    admissibility, or learning update.
 
 This slice uses manual, synthetic input only. Cartographic, fitter, belief, and scenario execution is
 local and deterministic; the workbench has no write endpoint and refuses non-loopback bindings.
 `coverage_state` remains `NOT_ESTABLISHED`, completeness is never claimed,
 and post-cutoff surface definitions are labeled as hindsight in the query lens. Fitter and scenario
-empirical validity is `NOT_ESTABLISHED`, residual readback is not performed, and Bayesian and belief
-outputs are explicitly diagnostic rather than truth probabilities. Scenario branches are
+empirical validity is `NOT_ESTABLISHED`. Phase 8B predeclares an evaluation design and temporal
+leakage boundary, but does not select a fitter, execute a forecast, or produce a prediction. Its
+target and metric remain user-declared and unvalidated. Phase 8A retains a later observation
+readback, but the
+reference scenario run has `prediction_state: NOT_REQUESTED`; therefore the forecast baseline is
+`NOT_AVAILABLE`, residual is `NOT_COMPUTED`, validity and weighting updates are `NOT_APPLIED`, and
+learning is `NOT_STARTED`. Together these are prerequisite gates, not the full Phase 8 residual
+loop. Bayesian and belief outputs are explicitly diagnostic rather than truth probabilities.
+Scenario branches are
 user-defined conditional structures: likelihood is `NOT_COMPUTED`, trajectories are
-`NOT_SIMULATED`, and the unknown/unmodeled region remains visible. The slice performs no network
-collection, entity merging, automated claim extraction, forecasting, targeting, or external action.
+`NOT_SIMULATED`, and the unknown/unmodeled region remains visible. Phase 7 ranking is an ordinal
+structural heuristic over user-supplied, unvalidated expected effects; it does not compute expected
+information gain, source feasibility, source independence, or probabilities. The slice performs no
+network collection, entity merging, automated claim extraction, forecasting, targeting, or external
+action.
 A claim remains unresolved even when evidence is linked, and repeated dependent evidence is never
 counted as independent corroboration. Candidate resolution is review history only: it never performs
 a canonical entity merge.
@@ -88,8 +114,8 @@ make demo
 make workbench
 ```
 
-`make workbench` creates the closed synthetic Phase 5 ledger in a temporary directory and serves
-the Phase 6 workbench at `http://127.0.0.1:4173`. It takes no external action and removes the
+`make workbench` creates the closed synthetic Phase 8B ledger in a temporary directory and serves
+the bounded workbench at `http://127.0.0.1:4173`. It takes no external action and removes the
 temporary ledger when stopped.
 
 Or create a local ledger manually:
@@ -119,6 +145,18 @@ uv run readin show-belief-revision --ledger .readin/events.jsonl \
   --revision <belief-revision-id>
 uv run readin show-scenario-run --ledger .readin/events.jsonl \
   --run <scenario-run-id>
+uv run readin show-discrimination-run --ledger .readin/events.jsonl \
+  --run <discrimination-run-id>
+uv run readin create-forecast-evaluation-design --ledger .readin/events.jsonl \
+  --scenario <scenario-id> --name "Evaluation design" \
+  --observation-type <later-observation-type> --field <numeric-field> \
+  --unit <unit> --training-cutoff <ISO-8601-cutoff-before-forecast-origin>
+uv run readin show-forecast-evaluation-design --ledger .readin/events.jsonl \
+  --design <forecast-evaluation-design-id>
+uv run readin run-residual-readback --ledger .readin/events.jsonl \
+  --scenario-run <scenario-run-id> --observation <later-observation-id>
+uv run readin show-residual-readback --ledger .readin/events.jsonl \
+  --readback <readback-id>
 uv run readin show-workbench --ledger .readin/events.jsonl --asset <entity-id>
 uv run readin workbench --ledger .readin/events.jsonl --host 127.0.0.1 --port 4173
 ```

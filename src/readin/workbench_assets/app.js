@@ -16,7 +16,8 @@ const escapeHtml = (value) =>
     .replaceAll("'", "&#039;");
 
 const shortId = (value) => (value ? value.slice(0, 8) : "—");
-const titleCase = (value) => String(value ?? "").toLowerCase().replaceAll("_", " ");
+const titleCase = (value) =>
+  String(value ?? "").toLowerCase().replaceAll("_", " ").replaceAll(".", " ");
 
 function stateClass(value) {
   const text = String(value ?? "");
@@ -111,6 +112,12 @@ function renderLimits() {
     trajectory_state: "Trajectory",
     empirical_validity_state: "Empirical validity",
     consensus_state: "Consensus",
+    collection_state: "Collection",
+    acquisition_state: "Acquisition",
+    source_independence_state: "Source independence",
+    residual_state: "Residual",
+    validity_update_state: "Validity update",
+    learning_state: "Learning",
   };
   byId("limit-list").innerHTML = Object.entries(state.snapshot.epistemic_limits)
     .map(
@@ -307,6 +314,95 @@ function renderScenarios(asset) {
     .join("")}</div>`;
 }
 
+function renderCollection(asset) {
+  const plan = asset.collection.latest_discrimination;
+  if (!plan) return emptyState();
+  const rows = plan.candidates.length
+    ? `<ul class="record-list">${plan.candidates
+        .map(
+          (candidate) => `<li class="record-row">
+            <div class="record-primary">${escapeHtml(candidate.name)}
+              <small>${candidate.rank ? `rank ${candidate.rank}` : "not ranked"} · effort ${escapeHtml(candidate.effort)}</small>
+            </div>
+            <div class="record-secondary">${escapeHtml(candidate.question)}
+              <small>${escapeHtml(candidate.observer_frame_name)} · separation ${candidate.directional_separation_units} · distinguished pairs ${candidate.distinguished_hypothesis_pair_units} · discriminating outcomes ${candidate.discriminating_outcome_count} · blind-region alignment ${candidate.blind_region_alignment_count}</small>
+            </div>
+            ${stateTag(candidate.discrimination_state)}
+          </li>`,
+        )
+        .join("")}</ul>`
+    : emptyState();
+  const boundary = `<div class="collection-boundary">
+    <div><span>Ambiguity</span><strong>${escapeHtml(plan.ambiguity_statement)}</strong></div>
+    <div class="collection-boundary-states">
+      ${stateTag(plan.collection_state)}
+      ${stateTag(plan.acquisition_state)}
+      ${stateTag(plan.source_independence_state)}
+    </div>
+    <p>Manual expected effects are ranked by a structural ordinal heuristic. Expected information gain and probabilities are not computed. No source was queried or acquired.</p>
+  </div>`;
+  return `<div class="overview-grid">
+    ${sectionCard(plan.name, plan.recommendation_state, boundary, true)}
+    ${sectionCard("Candidate observations", `${plan.candidates.length} manually declared`, rows, true)}
+  </div>`;
+}
+
+function renderReadback(asset) {
+  const item = asset.readback.latest;
+  const design = asset.forecasting.latest_evaluation_design;
+  if (!item && !design) return emptyState();
+  const designBody = design
+    ? `<div class="collection-boundary">
+        <div><span>Predeclared target</span><strong>${escapeHtml(design.structured_field_path.map(titleCase).join(" → "))} · ${escapeHtml(design.unit)}</strong></div>
+        <div class="collection-boundary-states">
+          ${stateTag(design.preregistration_state)}
+          ${stateTag(design.fitter_selection_state)}
+          ${stateTag(design.prediction_state)}
+        </div>
+        <p>${escapeHtml(design.metric_name)} was recorded before the forecast origin using a ledger-recorded training cutoff. Post-cutoff input is excluded. The target and metric remain user-declared and unvalidated; no forecast-capable fitter is registered.</p>
+      </div>
+      <ul class="record-list"><li class="record-row">
+        <div class="record-primary">${escapeHtml(titleCase(design.observation_type))}<small>${escapeHtml(design.target_semantics)}</small></div>
+        <div class="record-secondary">Training cutoff ${escapeHtml(design.training_cutoff)}<small>Forecast origin ${escapeHtml(design.forecast_origin)} · horizon end ${escapeHtml(design.horizon_end)}</small></div>
+        ${stateTag(design.forecast_capable_fitter_state)}
+      </li></ul>`
+    : emptyState();
+  if (!item) {
+    return sectionCard("Forecast evaluation design", design.name, designBody, true);
+  }
+  const eligibility = `<div class="collection-boundary">
+    <div><span>Reference scenario</span><strong>${escapeHtml(item.scenario_name)}</strong></div>
+    <div class="collection-boundary-states">
+      ${stateTag(item.baseline_eligibility_state)}
+      ${stateTag(item.residual_state)}
+      ${stateTag(item.validity_update_state)}
+    </div>
+    <p>A later observation is bound to the earlier scenario run, but that run produced conditional branch evaluation—not a forecast. READIN therefore retains the readback and applies no residual, validity, weighting, or admissibility update.</p>
+  </div>`;
+  const observation = `<div class="aperture-grid">
+    <div class="aperture-cell"><strong>${item.observation_count}</strong><span>Later observations</span></div>
+    <div class="aperture-cell"><strong>${escapeHtml(item.scenario_horizon_days)}</strong><span>Scenario days</span></div>
+    <div class="aperture-cell"><strong>${escapeHtml(item.reference_prediction_state)}</strong><span>Prediction state</span></div>
+    <div class="aperture-cell"><strong>${item.network_access ? "YES" : "NO"}</strong><span>Network access</span></div>
+  </div>
+  <ul class="record-list"><li class="record-row">
+    <div class="record-primary">${escapeHtml(item.observation_types.map(titleCase).join(" · "))}<small>${escapeHtml(item.latest_observed_at)}</small></div>
+    <div class="record-secondary">Later than the declared scenario horizon<small>${escapeHtml(item.temporal_order_state)}</small></div>
+    ${stateTag(item.forecast_baseline_state)}
+  </li></ul>`;
+  const updates = `<ul class="record-list">
+    <li class="record-row"><div class="record-primary">Fitter validity</div><div class="record-secondary">No eligible residual exists</div>${stateTag(item.validity_update_state)}</li>
+    <li class="record-row"><div class="record-primary">Fitter weighting</div><div class="record-secondary">No weight change is justified</div>${stateTag(item.weighting_update_state)}</li>
+    <li class="record-row"><div class="record-primary">Future admissibility</div><div class="record-secondary">No admissibility rule is changed</div>${stateTag(item.future_admissibility_update_state)}</li>
+  </ul>`;
+  return `<div class="overview-grid">
+    ${sectionCard("Forecast evaluation design", design?.name ?? "none", designBody, true)}
+    ${sectionCard("Residual readback gate", item.baseline_eligibility_state, eligibility, true)}
+    ${sectionCard("Bound later observation", shortId(item.id), observation, true)}
+    ${sectionCard("Update state", item.learning_state, updates, true)}
+  </div>`;
+}
+
 function renderTimeline(asset) {
   if (!asset.timeline.length) return emptyState();
   const rows = asset.timeline
@@ -329,6 +425,8 @@ function renderActiveView(asset) {
     relations: renderRelations,
     belief: renderBelief,
     scenarios: renderScenarios,
+    collection: renderCollection,
+    readback: renderReadback,
     timeline: renderTimeline,
   };
   byId("view-panel").innerHTML = renderers[state.activeTab](asset);

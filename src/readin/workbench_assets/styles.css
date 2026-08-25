@@ -509,6 +509,7 @@ p {
 .record-primary {
   min-width: 0;
   font-weight: 620;
+  overflow-wrap: anywhere;
 }
 
 .record-primary small,
@@ -526,6 +527,7 @@ p {
   min-width: 0;
   color: #c2c9ce;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .state-tag {
@@ -604,6 +606,39 @@ p {
   color: #d1b17f;
   font-size: 11px;
   line-height: 1.6;
+}
+
+.collection-boundary {
+  padding: 14px;
+}
+
+.collection-boundary > div:first-child span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.collection-boundary > div:first-child strong {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.collection-boundary-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.collection-boundary p {
+  max-width: 760px;
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
 }
 
 .boundary-answer {

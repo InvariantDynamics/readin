@@ -7,6 +7,10 @@ import json
 from typing import Any
 
 from readin.belief import execute_belief_revision
+from readin.discrimination import (
+    create_bounded_discrimination_plan,
+    execute_discrimination_plan,
+)
 from readin.events import (
     create_belief_edge_created,
     create_cartographic_query_planned,
@@ -28,7 +32,9 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
+from readin.forecasting import create_forecast_evaluation_design
 from readin.projection import ReadinProjection
+from readin.residuals import execute_residual_readback
 from readin.scenarios import create_bounded_scenario, execute_scenario
 
 
@@ -604,4 +610,215 @@ def phase5_events() -> list[dict[str, Any]]:
         occurred_at="2026-08-21T12:00:34Z",
     )
     events.append(run_event)
+    return events
+
+
+def phase7_events() -> list[dict[str, Any]]:
+    """Return a local discriminating-observation ranking without collection."""
+
+    events = phase5_events()
+    asset_id = "11111111-1111-4111-8111-111111111111"
+    upstream_hypothesis_id = "81818181-8181-4181-8181-818181818181"
+    downstream_hypothesis_id = "82828282-8282-4282-8282-828282828282"
+    independent_frame_id = "91919191-9191-4191-8191-919191919191"
+
+    frame_event = create_observer_frame_registered(
+        "Synthetic independent technical verification",
+        "independent_technical_record",
+        access_description="Closed synthetic independent-verification fixture",
+        measurement_name="manual_verification_recording",
+        measurement_description="A user could record an authorized verification artifact",
+        known_blind_regions=["No direct internal telemetry"],
+        validity_conditions=["Valid only for the bundled synthetic planning fixture"],
+        frame_id=independent_frame_id,
+        event_id="91919191-9191-4191-8191-919191919192",
+        occurred_at="2026-08-21T12:00:35Z",
+    )
+    events.append(frame_event)
+    projection = ReadinProjection.replay(events)
+
+    plan_event = create_bounded_discrimination_plan(
+        projection,
+        asset_id,
+        "Resolve relationship versus activity ambiguity",
+        (
+            "The public relationship can remain observable while independent program "
+            "activity is absent or no longer relevant"
+        ),
+        "84848484-8484-4484-8484-848484848481",
+        "39393939-3939-4393-8393-393939393939",
+        [upstream_hypothesis_id, downstream_hypothesis_id],
+        [
+            {
+                "id": "93939393-9393-4393-8393-939393939391",
+                "name": "Independent activity verification",
+                "observer_frame_id": independent_frame_id,
+                "observation_type": "independent_record.program_activity",
+                "question": (
+                    "Does an authorized independent artifact show current program activity?"
+                ),
+                "declared_blind_region_targets": ["No independent operational verification"],
+                "expected_outcomes": [
+                    {
+                        "label": "Independent activity artifact observed",
+                        "hypothesis_effects": [
+                            {
+                                "hypothesis_id": upstream_hypothesis_id,
+                                "effect": "NO_EFFECT",
+                            },
+                            {
+                                "hypothesis_id": downstream_hypothesis_id,
+                                "effect": "SUPPORTS_HYPOTHESIS",
+                            },
+                        ],
+                    },
+                    {
+                        "label": "Independent activity artifact absent",
+                        "hypothesis_effects": [
+                            {
+                                "hypothesis_id": upstream_hypothesis_id,
+                                "effect": "NO_EFFECT",
+                            },
+                            {
+                                "hypothesis_id": downstream_hypothesis_id,
+                                "effect": "CHALLENGES_HYPOTHESIS",
+                            },
+                        ],
+                    },
+                ],
+                "effort": "MEDIUM",
+            },
+            {
+                "id": "93939393-9393-4393-8393-939393939392",
+                "name": "Public relationship follow-up",
+                "observer_frame_id": "22222222-2222-4222-8222-222222222222",
+                "observation_type": "public_record.relationship_follow_up",
+                "question": "Does the public record still repeat the reported relationship?",
+                "expected_outcomes": [
+                    {
+                        "label": "Relationship reiterated",
+                        "hypothesis_effects": [
+                            {
+                                "hypothesis_id": upstream_hypothesis_id,
+                                "effect": "SUPPORTS_HYPOTHESIS",
+                            },
+                            {
+                                "hypothesis_id": downstream_hypothesis_id,
+                                "effect": "SUPPORTS_HYPOTHESIS",
+                            },
+                        ],
+                    },
+                    {
+                        "label": "Relationship withdrawn",
+                        "hypothesis_effects": [
+                            {
+                                "hypothesis_id": upstream_hypothesis_id,
+                                "effect": "CHALLENGES_HYPOTHESIS",
+                            },
+                            {
+                                "hypothesis_id": downstream_hypothesis_id,
+                                "effect": "CHALLENGES_HYPOTHESIS",
+                            },
+                        ],
+                    },
+                ],
+                "effort": "LOW",
+            },
+        ],
+        plan_id="92929292-9292-4292-8292-929292929291",
+        event_id="92929292-9292-4292-8292-929292929292",
+        occurred_at="2026-08-21T12:00:36Z",
+    )
+    projection.apply(plan_event)
+    events.append(plan_event)
+
+    events.append(
+        execute_discrimination_plan(
+            projection,
+            "92929292-9292-4292-8292-929292929291",
+            run_id="94949494-9494-4494-8494-949494949491",
+            receipt_id="94949494-9494-4494-8494-949494949492",
+            event_id="94949494-9494-4494-8494-949494949493",
+            occurred_at="2026-08-21T12:00:37Z",
+        )
+    )
+    return events
+
+
+def phase8_events() -> list[dict[str, Any]]:
+    """Return a predeclared target and later readback without a forecast baseline."""
+
+    events = phase7_events()
+    asset_id = "11111111-1111-4111-8111-111111111111"
+    frame_id = "91919191-9191-4191-8191-919191919191"
+    artifact_id = "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1"
+    observation_id = "a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2"
+    payload = {
+        "reported_program": "Synthetic compute research initiative",
+        "readback_status": "follow_up_observed",
+        "activity_score": 1.0,
+        "fixture_boundary": "manual_synthetic_only",
+    }
+    artifact_bytes = json.dumps(
+        payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    source_uri = "urn:readin:synthetic:later-readback-001"
+
+    projection = ReadinProjection.replay(events)
+    events.append(
+        create_forecast_evaluation_design(
+            projection,
+            "85858585-8585-4585-8585-858585858585",
+            "Synthetic program-activity forecast evaluation",
+            "independent_record.program_activity_follow_up",
+            ["activity_score"],
+            "synthetic_activity_index",
+            training_cutoff="2026-08-21T12:00:37Z",
+            design_id="a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a0",
+            event_id="a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a2",
+            occurred_at="2026-08-21T12:00:38Z",
+        )
+    )
+
+    events.append(
+        create_evidence_manifested(
+            hashlib.sha256(artifact_bytes).hexdigest(),
+            "application/json",
+            len(artifact_bytes),
+            "Bundled synthetic later readback",
+            source_uri=source_uri,
+            license_name="Apache-2.0",
+            artifact_id=artifact_id,
+            event_id="a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a2",
+            occurred_at="2026-09-22T12:00:00Z",
+        )
+    )
+    events.append(
+        create_observation_admitted(
+            [asset_id],
+            frame_id,
+            artifact_id,
+            "independent_record.program_activity_follow_up",
+            payload,
+            "2026-09-22T11:59:00Z",
+            source_uri=source_uri,
+            uncertainty={"disposition": "NOT_EVALUATED"},
+            observation_id=observation_id,
+            event_id="a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a3",
+            occurred_at="2026-09-22T12:00:01Z",
+        )
+    )
+
+    projection = ReadinProjection.replay(events)
+    events.append(
+        execute_residual_readback(
+            projection,
+            "89898989-8989-4989-8989-898989898981",
+            [observation_id],
+            readback_id="b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b1",
+            receipt_id="b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2",
+            event_id="b3b3b3b3-b3b3-43b3-83b3-b3b3b3b3b3b3",
+            occurred_at="2026-09-22T12:00:02Z",
+        )
+    )
     return events

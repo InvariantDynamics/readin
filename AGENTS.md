@@ -28,7 +28,7 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 6 slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 8B slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -54,6 +54,16 @@ The Phase 0 through bounded Phase 6 slices are local-first and manual-input only
 - structural branch-antecedent evaluation without likelihoods or simulated trajectories;
 - deterministic read-only workbench projection over one replayed local ledger;
 - loopback-only static asset workbench with no write endpoint;
+- manual, ambiguity-bound candidate-observation plans;
+- deterministic ordinal structural-discrimination ranking with ties and abstention;
+- digest-bound discrimination receipts with collection and acquisition fixed off;
+- preregistered numeric forecast-evaluation targets and metrics;
+- ledger-recorded training cutoffs with post-cutoff input exclusion;
+- forecast fitter selection, execution, prediction, and calibration fixed off;
+- later manual-observation binding to an earlier scenario horizon;
+- fail-closed forecast-baseline eligibility with digest-bound readback receipts;
+- residual, validity, weighting, future-admissibility, and learning updates fixed off when no
+  forecast baseline exists;
 - append-only JSONL event persistence;
 - deterministic asset-state replay;
 - schema validation and fail-closed referential checks.
@@ -64,14 +74,27 @@ exists in this slice. Resolution assessments never mutate canonical entity ident
 relations, candidate dispositions, surfaces, and query plans are manually recorded epistemic
 objects, not machine truth determinations. A cartographic result never establishes source coverage
 or completeness, and execution cannot access the network. Reference fitter outputs are local
-diagnostics with `NOT_ESTABLISHED` empirical validity, `NOT_CALIBRATED` uncertainty, no residual
-readback, and no model or action authority. Belief states are categorical diagnostic signal balances,
+diagnostics with `NOT_ESTABLISHED` empirical validity, `NOT_CALIBRATED` uncertainty, and no model or
+action authority. Belief states are categorical diagnostic signal balances,
 not probabilities or truth determinations. Scenario interventions have `NOT_ESTABLISHED` causal
 status, the unmodeled region cannot be removed, and scenario execution performs no fitter forecast,
 likelihood assignment, trajectory simulation, prediction, or action.
 The Phase 6 workbench is a local presentation and replay surface only. It binds to loopback,
 refuses mutation methods, performs no authentication or remote service exposure, and does not add
 scientific, operational, surveillance, targeting, or action authority.
+The Phase 7 planner ranks only user-declared expected effects. It performs no source query,
+acquisition, expected-information-gain calculation, probability calculation, feasibility
+validation, source-independence validation, or collection recommendation with action authority.
+Phase 8A records a readback only after one or more admitted observations fall strictly after the
+bound scenario horizon. Because the current scenario runtime produces structural branch evaluation
+rather than a forecast, the readback must remain `INELIGIBLE_NO_FORECAST_BASELINE`, residual must
+remain `NOT_COMPUTED`, and all validity, weighting, future-admissibility, and learning updates remain
+off. This prerequisite gate does not satisfy the full Phase 8 residual-loop exit condition.
+Phase 8B adds only the missing evaluation-design prerequisite: one user-declared numeric target,
+absolute-error metric, training cutoff, forecast origin, and post-cutoff exclusion policy recorded
+before the scenario begins. It requires later readback observations to match that target, but keeps
+fitter selection `NOT_SELECTED`, execution `NOT_STARTED`, prediction `NOT_PRODUCED`, and calibration
+`NOT_ESTABLISHED`. It does not create a forecast-capable fitter or satisfy the Phase 8 exit condition.
 
 ## Contract changes
 

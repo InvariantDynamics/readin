@@ -1,4 +1,4 @@
-"""Read-only Phase 6 workbench projection and loopback HTTP server."""
+"""Read-only workbench through bounded Phase 8B forecast design and residual eligibility."""
 
 from __future__ import annotations
 
@@ -212,6 +212,105 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             }
         )
 
+    discrimination = None
+    if view["discrimination_plans"]:
+        item = view["discrimination_plans"][-1]
+        plan = item["plan"]
+        run = item["run"]
+        candidate_by_id = {candidate["id"]: candidate for candidate in plan["candidates"]}
+        scores = run["candidate_scores"] if run is not None else []
+        discrimination = {
+            "id": plan["id"],
+            "name": plan["name"],
+            "ambiguity_statement": plan["ambiguity_statement"],
+            "recommendation_state": (
+                run["recommendation_state"] if run is not None else "NOT_EVALUATED"
+            ),
+            "top_candidate_ids": deepcopy(run["top_candidate_ids"] if run else []),
+            "collection_state": item["collection_state"],
+            "acquisition_state": item["acquisition_state"],
+            "source_independence_state": item["source_independence_state"],
+            "expected_information_gain_state": item["expected_information_gain_state"],
+            "probability_state": item["probability_state"],
+            "ranking_interpretation": (
+                "STRUCTURAL_ORDINAL_HEURISTIC_NOT_EXPECTED_INFORMATION_GAIN"
+            ),
+            "candidates": [
+                {
+                    **deepcopy(score),
+                    "name": candidate_by_id[score["candidate_id"]]["name"],
+                    "question": candidate_by_id[score["candidate_id"]]["question"],
+                    "observation_type": candidate_by_id[score["candidate_id"]]["observation_type"],
+                    "effort": candidate_by_id[score["candidate_id"]]["effort"],
+                    "observer_frame_name": projection.frames[
+                        candidate_by_id[score["candidate_id"]]["observer_frame_id"]
+                    ]["name"],
+                    "blind_region_targets": deepcopy(
+                        candidate_by_id[score["candidate_id"]]["declared_blind_region_targets"]
+                    ),
+                }
+                for score in scores
+            ],
+        }
+
+    forecast_design = None
+    if view["forecast_evaluation_designs"]:
+        item = view["forecast_evaluation_designs"][-1]
+        design = item["design"]
+        forecast_design = {
+            "id": design["id"],
+            "name": design["name"],
+            "scenario_name": item["scenario"]["name"],
+            "observation_type": design["target"]["observation_type"],
+            "structured_field_path": deepcopy(design["target"]["structured_field_path"]),
+            "unit": design["target"]["unit"],
+            "target_semantics": design["target"]["target_semantics"],
+            "metric_name": design["metric"]["name"],
+            "metric_state": design["metric"]["metric_state"],
+            "residual_definition": design["metric"]["residual_definition"],
+            "training_cutoff": design["timing"]["training_cutoff"],
+            "forecast_origin": design["timing"]["forecast_origin"],
+            "horizon_end": design["timing"]["horizon_end"],
+            "leakage_basis": design["timing"]["leakage_basis"],
+            "post_cutoff_input_policy": design["timing"]["post_cutoff_input_policy"],
+            "preregistration_state": design["preregistration_state"],
+            "fitter_selection_state": design["fitter_selection_state"],
+            "forecast_capable_fitter_state": item["forecast_capable_fitter_state"],
+            "forecast_execution_state": item["forecast_execution_state"],
+            "prediction_state": item["prediction_state"],
+            "calibration_state": item["calibration_state"],
+        }
+
+    residual_readback = None
+    if view["residual_readbacks"]:
+        item = view["residual_readbacks"][-1]
+        readback = item["readback"]
+        residual_readback = {
+            "id": readback["id"],
+            "scenario_run_id": readback["scenario_run_id"],
+            "scenario_name": item["scenario"]["name"],
+            "scenario_start_time": item["scenario"]["start_time"],
+            "scenario_horizon_days": item["scenario"]["horizon_days"],
+            "observation_count": len(item["observations"]),
+            "latest_observed_at": max(
+                observation["observed_at"] for observation in item["observations"]
+            ),
+            "observation_types": sorted(
+                {observation["observation_type"] for observation in item["observations"]}
+            ),
+            "temporal_order_state": readback["temporal_order_state"],
+            "baseline_eligibility_state": readback["baseline_eligibility_state"],
+            "reference_prediction_state": readback["reference_prediction_state"],
+            "forecast_baseline_state": item["forecast_baseline_state"],
+            "residual_state": item["residual_state"],
+            "validity_update_state": item["validity_update_state"],
+            "weighting_update_state": item["weighting_update_state"],
+            "future_admissibility_update_state": item["future_admissibility_update_state"],
+            "learning_state": item["learning_state"],
+            "interpretation": readback["interpretation"],
+            "network_access": readback["execution_receipt"]["network_access"],
+        }
+
     timeline = projection.timeline_view(entity_id)["entries"]
     return {
         "identity": {
@@ -237,6 +336,9 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "resolution_candidates": len(view["resolution_candidates"]),
             "hypotheses": len(hypotheses),
             "scenarios": len(scenarios),
+            "discrimination_plans": len(view["discrimination_plans"]),
+            "forecast_evaluation_designs": len(view["forecast_evaluation_designs"]),
+            "residual_readbacks": len(view["residual_readbacks"]),
             "timeline_events": len(timeline),
         },
         "observer_frames": frames,
@@ -292,6 +394,9 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
         "fitters": {"latest_run": latest_fitter},
         "belief": {"latest_revision": latest_revision, "hypotheses": hypotheses},
         "scenarios": scenarios,
+        "collection": {"latest_discrimination": discrimination},
+        "forecasting": {"latest_evaluation_design": forecast_design},
+        "readback": {"latest": residual_readback},
         "timeline": [
             {
                 "event_id": item["event_id"],
@@ -336,6 +441,12 @@ def build_workbench_snapshot(
             "trajectory_state": "NOT_SIMULATED",
             "empirical_validity_state": "NOT_ESTABLISHED",
             "consensus_state": "NOT_COMPUTED",
+            "collection_state": "NOT_STARTED",
+            "acquisition_state": "NOT_ATTEMPTED",
+            "source_independence_state": "NOT_ESTABLISHED",
+            "residual_state": "NOT_COMPUTED",
+            "validity_update_state": "NOT_APPLIED",
+            "learning_state": "NOT_STARTED",
         },
         "catalog": catalog,
         "selected_asset": (
