@@ -1,4 +1,4 @@
-"""Read-only workbench through bounded Phase 8B forecast design and residual eligibility."""
+"""Read-only workbench through bounded Phase 8D readback selection."""
 
 from __future__ import annotations
 
@@ -254,9 +254,11 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
         }
 
     forecast_design = None
+    forecast_baseline = None
     if view["forecast_evaluation_designs"]:
         item = view["forecast_evaluation_designs"][-1]
         design = item["design"]
+        baseline = item["forecast_baseline"]
         forecast_design = {
             "id": design["id"],
             "name": design["name"],
@@ -276,9 +278,117 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "preregistration_state": design["preregistration_state"],
             "fitter_selection_state": design["fitter_selection_state"],
             "forecast_capable_fitter_state": item["forecast_capable_fitter_state"],
+            "forecast_baseline_state": item["forecast_baseline_state"],
             "forecast_execution_state": item["forecast_execution_state"],
             "prediction_state": item["prediction_state"],
             "calibration_state": item["calibration_state"],
+        }
+    if view["forecast_baselines"]:
+        item = view["forecast_baselines"][-1]
+        baseline = item["baseline"]
+        forecast_baseline = {
+            "id": baseline["id"],
+            "method_name": baseline["method"]["name"],
+            "method_state": baseline["method"]["method_state"],
+            "forecast_method_selection_state": baseline["forecast_method_selection_state"],
+            "prediction_value": baseline["prediction"]["value"],
+            "unit": baseline["prediction"]["unit"],
+            "target_observation_type": baseline["prediction"]["target_observation_type"],
+            "structured_field_path": deepcopy(baseline["prediction"]["structured_field_path"]),
+            "forecast_origin": baseline["prediction"]["forecast_origin"],
+            "horizon_end": baseline["prediction"]["horizon_end"],
+            "prediction_state": baseline["prediction"]["prediction_state"],
+            "input_state": baseline["input_boundary"]["input_state"],
+            "selected_input_observation_ids": deepcopy(
+                baseline["input_boundary"]["selected_input_observation_ids"]
+            ),
+            "calibration_state": baseline["calibration_state"],
+            "empirical_validity_state": baseline["empirical_validity_state"],
+            "residual_scoring_state": baseline["residual_scoring_state"],
+            "validity_update_state": baseline["validity_update_state"],
+            "weighting_update_state": baseline["weighting_update_state"],
+            "learning_state": baseline["learning_state"],
+            "network_access": baseline["execution_receipt"]["network_access"],
+            "recorded_at": baseline["recorded_at"],
+        }
+
+    readback_selection = None
+    if view["readback_selection_plans"]:
+        item = view["readback_selection_plans"][-1]
+        plan = item["plan"]
+        run = item["run"]
+        readback_selection = {
+            "plan_id": plan["id"],
+            "name": plan["name"],
+            "target_observation_type": plan["target"]["observation_type"],
+            "structured_field_path": deepcopy(plan["target"]["structured_field_path"]),
+            "unit": plan["target"]["unit"],
+            "unit_match_state": plan["target"]["unit_match_state"],
+            "horizon_end": plan["timing"]["horizon_end"],
+            "observed_window_end": plan["timing"]["observed_window_end"],
+            "ledger_admission_cutoff": plan["timing"]["ledger_admission_cutoff"],
+            "eligible_observer_frames": [
+                {"id": frame["id"], "name": frame["name"]}
+                for frame in item["eligible_observer_frames"]
+            ],
+            "cardinality": plan["selection_policy"]["cardinality"],
+            "zero_candidate_policy": plan["selection_policy"]["zero_candidate_policy"],
+            "multiple_candidate_policy": plan["selection_policy"]["multiple_candidate_policy"],
+            "aggregation_policy": plan["selection_policy"]["aggregation_policy"],
+            "ranking_policy": plan["selection_policy"]["ranking_policy"],
+            "preregistration_state": plan["preregistration_state"],
+            "execution_state": "COMPLETED" if run is not None else "NOT_STARTED",
+            "selection_state": run["selection_state"] if run is not None else "NOT_EXECUTED",
+            "candidate_count": run["candidate_count"] if run is not None else None,
+            "candidate_observation_ids": (
+                deepcopy(run["candidate_observation_ids"]) if run is not None else []
+            ),
+            "selected_observation_id": (
+                run["selected_observation_id"] if run is not None else None
+            ),
+            "selected_target_value": run["selected_target_value"] if run is not None else None,
+            "excluded_counts": (
+                {
+                    "after_admission_cutoff": len(
+                        run["excluded_after_admission_cutoff_observation_ids"]
+                    ),
+                    "outside_observed_window": len(
+                        run["excluded_outside_observed_window_observation_ids"]
+                    ),
+                    "observation_type_mismatch": len(
+                        run["excluded_observation_type_mismatch_observation_ids"]
+                    ),
+                    "frame_mismatch": len(run["excluded_frame_mismatch_observation_ids"]),
+                    "invalid_target": len(run["excluded_invalid_target_observation_ids"]),
+                }
+                if run is not None
+                else None
+            ),
+            "aggregation_state": run["aggregation_state"] if run is not None else "NOT_PERFORMED",
+            "ranking_state": run["ranking_state"] if run is not None else "NOT_PERFORMED",
+            "residual_state": run["residual_state"] if run is not None else "NOT_COMPUTED",
+            "residual_scoring_state": (
+                run["residual_scoring_state"] if run is not None else "NOT_ENABLED"
+            ),
+            "calibration_state": (
+                run["calibration_state"] if run is not None else "NOT_ESTABLISHED"
+            ),
+            "empirical_validity_state": (
+                run["empirical_validity_state"] if run is not None else "NOT_ESTABLISHED"
+            ),
+            "validity_update_state": (
+                run["validity_update_state"] if run is not None else "NOT_APPLIED"
+            ),
+            "weighting_update_state": (
+                run["weighting_update_state"] if run is not None else "NOT_APPLIED"
+            ),
+            "future_admissibility_update_state": (
+                run["future_admissibility_update_state"] if run is not None else "NOT_APPLIED"
+            ),
+            "learning_state": run["learning_state"] if run is not None else "NOT_STARTED",
+            "network_access": (
+                run["execution_receipt"]["network_access"] if run is not None else False
+            ),
         }
 
     residual_readback = None
@@ -338,6 +448,11 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "scenarios": len(scenarios),
             "discrimination_plans": len(view["discrimination_plans"]),
             "forecast_evaluation_designs": len(view["forecast_evaluation_designs"]),
+            "forecast_baselines": len(view["forecast_baselines"]),
+            "readback_selection_plans": len(view["readback_selection_plans"]),
+            "readback_selection_runs": sum(
+                item["run"] is not None for item in view["readback_selection_plans"]
+            ),
             "residual_readbacks": len(view["residual_readbacks"]),
             "timeline_events": len(timeline),
         },
@@ -395,8 +510,14 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
         "belief": {"latest_revision": latest_revision, "hypotheses": hypotheses},
         "scenarios": scenarios,
         "collection": {"latest_discrimination": discrimination},
-        "forecasting": {"latest_evaluation_design": forecast_design},
-        "readback": {"latest": residual_readback},
+        "forecasting": {
+            "latest_evaluation_design": forecast_design,
+            "latest_baseline": forecast_baseline,
+        },
+        "readback": {
+            "latest": residual_readback,
+            "latest_selection": readback_selection,
+        },
         "timeline": [
             {
                 "event_id": item["event_id"],
@@ -437,7 +558,11 @@ def build_workbench_snapshot(
             "coverage_state": "NOT_ESTABLISHED",
             "completeness_claim": "NOT_MADE",
             "probability_state": "NOT_COMPUTED",
-            "prediction_state": "NOT_REQUESTED",
+            "prediction_state": (
+                "PRODUCED_UNCALIBRATED_BASELINE"
+                if projection.forecast_baselines
+                else "NOT_REQUESTED"
+            ),
             "trajectory_state": "NOT_SIMULATED",
             "empirical_validity_state": "NOT_ESTABLISHED",
             "consensus_state": "NOT_COMPUTED",

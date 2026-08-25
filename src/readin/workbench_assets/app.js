@@ -349,8 +349,17 @@ function renderCollection(asset) {
 
 function renderReadback(asset) {
   const item = asset.readback.latest;
+  const selection = asset.readback.latest_selection;
   const design = asset.forecasting.latest_evaluation_design;
-  if (!item && !design) return emptyState();
+  const baseline = asset.forecasting.latest_baseline;
+  if (!item && !selection && !design) return emptyState();
+  const baselineRow = baseline
+    ? `<ul class="record-list"><li class="record-row">
+        <div class="record-primary">${escapeHtml(baseline.prediction_value)} ${escapeHtml(baseline.unit)}<small>${escapeHtml(baseline.method_name)} · ${escapeHtml(baseline.method_state)}</small></div>
+        <div class="record-secondary">Frozen before ${escapeHtml(baseline.forecast_origin)}<small>No training observations used · residual scoring ${escapeHtml(baseline.residual_scoring_state)}</small></div>
+        ${stateTag(baseline.prediction_state)}
+      </li></ul>`
+    : "";
   const designBody = design
     ? `<div class="collection-boundary">
         <div><span>Predeclared target</span><strong>${escapeHtml(design.structured_field_path.map(titleCase).join(" → "))} · ${escapeHtml(design.unit)}</strong></div>
@@ -359,16 +368,63 @@ function renderReadback(asset) {
           ${stateTag(design.fitter_selection_state)}
           ${stateTag(design.prediction_state)}
         </div>
-        <p>${escapeHtml(design.metric_name)} was recorded before the forecast origin using a ledger-recorded training cutoff. Post-cutoff input is excluded. The target and metric remain user-declared and unvalidated; no forecast-capable fitter is registered.</p>
+        <p>${baseline ? "A user-declared constant baseline was frozen before forecast origin. It used no training observations and remains uncalibrated and empirically unvalidated; residual scoring is still disabled." : `${escapeHtml(design.metric_name)} was recorded before the forecast origin using a ledger-recorded training cutoff. Post-cutoff input is excluded. The target and metric remain user-declared and unvalidated; no forecast-capable fitter is registered.`}</p>
       </div>
       <ul class="record-list"><li class="record-row">
         <div class="record-primary">${escapeHtml(titleCase(design.observation_type))}<small>${escapeHtml(design.target_semantics)}</small></div>
         <div class="record-secondary">Training cutoff ${escapeHtml(design.training_cutoff)}<small>Forecast origin ${escapeHtml(design.forecast_origin)} · horizon end ${escapeHtml(design.horizon_end)}</small></div>
         ${stateTag(design.forecast_capable_fitter_state)}
-      </li></ul>`
+      </li></ul>${baselineRow}`
     : emptyState();
+  if (selection) {
+    const frameNames = selection.eligible_observer_frames.map((frame) => frame.name).join(" · ");
+    const aperture = `<div class="collection-boundary">
+      <div><span>Eligible observer frames</span><strong>${escapeHtml(frameNames)}</strong></div>
+      <div class="collection-boundary-states">
+        ${stateTag(selection.preregistration_state)}
+        ${stateTag(selection.cardinality)}
+        ${stateTag(selection.execution_state)}
+      </div>
+      <p>Observed after ${escapeHtml(selection.horizon_end)} through ${escapeHtml(selection.observed_window_end)} and admitted to the ledger by ${escapeHtml(selection.ledger_admission_cutoff)}. Zero or multiple matches require abstention; aggregation, ranking, and post-hoc selection are prohibited.</p>
+    </div>
+    <ul class="record-list"><li class="record-row">
+      <div class="record-primary">${escapeHtml(titleCase(selection.target_observation_type))}<small>${escapeHtml(selection.structured_field_path.map(titleCase).join(" → "))} · ${escapeHtml(selection.unit)}</small></div>
+      <div class="record-secondary">Unit equivalence is not independently verified<small>${escapeHtml(selection.unit_match_state)}</small></div>
+      ${stateTag(selection.aggregation_policy)}
+    </li></ul>`;
+    const excluded = selection.excluded_counts ?? {
+      after_admission_cutoff: 0,
+      outside_observed_window: 0,
+      observation_type_mismatch: 0,
+      frame_mismatch: 0,
+      invalid_target: 0,
+    };
+    const selectionResult = `<div class="aperture-grid">
+      <div class="aperture-cell"><strong>${selection.candidate_count ?? "—"}</strong><span>Compatible candidates</span></div>
+      <div class="aperture-cell"><strong>${excluded.outside_observed_window}</strong><span>Outside time window</span></div>
+      <div class="aperture-cell"><strong>${excluded.frame_mismatch}</strong><span>Frame mismatch</span></div>
+      <div class="aperture-cell"><strong>${excluded.after_admission_cutoff}</strong><span>Admitted after cutoff</span></div>
+    </div>
+    <ul class="record-list"><li class="record-row">
+      <div class="record-primary">${selection.selected_target_value ?? "No value selected"}<small>${selection.selected_observation_id ? shortId(selection.selected_observation_id) : "Selector abstained or has not run"}</small></div>
+      <div class="record-secondary">No ranking or aggregation performed<small>${escapeHtml(selection.ranking_state)} · ${escapeHtml(selection.aggregation_state)}</small></div>
+      ${stateTag(selection.selection_state)}
+    </li></ul>`;
+    const updates = `<ul class="record-list">
+      <li class="record-row"><div class="record-primary">Residual</div><div class="record-secondary">Selection is not scoring</div>${stateTag(selection.residual_state)}</li>
+      <li class="record-row"><div class="record-primary">Calibration</div><div class="record-secondary">Forecast skill remains unestablished</div>${stateTag(selection.calibration_state)}</li>
+      <li class="record-row"><div class="record-primary">Fitter validity</div><div class="record-secondary">No validity claim is justified</div>${stateTag(selection.validity_update_state)}</li>
+      <li class="record-row"><div class="record-primary">Learning</div><div class="record-secondary">No model or weight update</div>${stateTag(selection.learning_state)}</li>
+    </ul>`;
+    return `<div class="overview-grid">
+      ${sectionCard("Forecast evaluation design", design?.name ?? "none", designBody, true)}
+      ${sectionCard("Predeclared readback aperture", selection.name, aperture, true)}
+      ${sectionCard("Exactly-one selection", selection.selection_state, selectionResult, true)}
+      ${sectionCard("Scoring boundary", selection.residual_scoring_state, updates, true)}
+    </div>`;
+  }
   if (!item) {
-    return sectionCard("Forecast evaluation design", design.name, designBody, true);
+    return sectionCard(baseline ? "Frozen forecast baseline" : "Forecast evaluation design", design.name, designBody, true);
   }
   const eligibility = `<div class="collection-boundary">
     <div><span>Reference scenario</span><strong>${escapeHtml(item.scenario_name)}</strong></div>

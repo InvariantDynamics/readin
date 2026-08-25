@@ -32,8 +32,15 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
-from readin.forecasting import create_forecast_evaluation_design
+from readin.forecasting import (
+    create_forecast_evaluation_design,
+    execute_frozen_forecast_baseline,
+)
 from readin.projection import ReadinProjection
+from readin.readback_selection import (
+    create_readback_selection_plan,
+    execute_readback_selection,
+)
 from readin.residuals import execute_residual_readback
 from readin.scenarios import create_bounded_scenario, execute_scenario
 
@@ -819,6 +826,61 @@ def phase8_events() -> list[dict[str, Any]]:
             receipt_id="b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2",
             event_id="b3b3b3b3-b3b3-43b3-83b3-b3b3b3b3b3b3",
             occurred_at="2026-09-22T12:00:02Z",
+        )
+    )
+    return events
+
+
+def phase8c_events() -> list[dict[str, Any]]:
+    """Return a frozen pre-origin baseline plus a later observation without scoring."""
+
+    phase8 = phase8_events()
+    events = list(phase8[:41])
+    projection = ReadinProjection.replay(events)
+    events.append(
+        execute_frozen_forecast_baseline(
+            projection,
+            "a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a0",
+            0.75,
+            baseline_id="c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c0",
+            receipt_id="c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c1",
+            event_id="c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c2",
+            occurred_at="2026-08-21T12:00:39Z",
+        )
+    )
+    events.extend(phase8[41:43])
+    return events
+
+
+def phase8d_events() -> list[dict[str, Any]]:
+    """Return one preregistered exactly-one readback selection without scoring."""
+
+    phase8c = phase8c_events()
+    events = list(phase8c[:42])
+    projection = ReadinProjection.replay(events)
+    events.append(
+        create_readback_selection_plan(
+            projection,
+            "c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c0",
+            ["91919191-9191-4191-8191-919191919191"],
+            name="Synthetic program-activity readback aperture",
+            observed_window_end="2026-09-23T00:00:00Z",
+            ledger_admission_cutoff="2026-09-23T12:00:00Z",
+            plan_id="d0d0d0d0-d0d0-40d0-80d0-d0d0d0d0d0d0",
+            event_id="d0d0d0d0-d0d0-40d0-80d0-d0d0d0d0d0d1",
+            occurred_at="2026-08-21T12:00:40Z",
+        )
+    )
+    events.extend(phase8c[42:44])
+    projection = ReadinProjection.replay(events)
+    events.append(
+        execute_readback_selection(
+            projection,
+            "d0d0d0d0-d0d0-40d0-80d0-d0d0d0d0d0d0",
+            run_id="d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d0",
+            receipt_id="d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1",
+            event_id="d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d2",
+            occurred_at="2026-09-23T12:00:01Z",
         )
     )
     return events

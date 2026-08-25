@@ -30,8 +30,8 @@ contracts and receipts; it does not redefine OFS Core.
 ## Current executable slice
 
 The current foundation, bounded Array, resolution, cartography, multi-fitter, belief, scenario,
-asset-workbench, discriminating-observation, forecast-evaluation design, and residual-readback
-eligibility slices implement one local epistemic loop:
+asset-workbench, discriminating-observation, forecast-evaluation design, frozen-baseline,
+readback-selection, and residual-readback eligibility slices implement one local epistemic loop:
 
 1. Create a typed entity and start tracking it as an asset.
 2. Register an observer frame.
@@ -72,13 +72,20 @@ eligibility slices implement one local epistemic loop:
     source.
 29. Predeclare one numeric forecast-evaluation target, metric, training cutoff, forecast origin, and
     post-cutoff exclusion policy before the scenario horizon begins.
-30. Keep fitter selection `NOT_SELECTED`, forecast execution `NOT_STARTED`, and prediction
-    `NOT_PRODUCED` while no forecast-capable fitter exists.
-31. Admit a later, manual observation and bind it to the predeclared target and earlier scenario run.
-32. Verify that the observation is strictly later than the scenario horizon and that the run has no
-    forecast baseline.
-33. Retain a digest-bound readback abstention with no residual, fitter-validity, weighting, future
-    admissibility, or learning update.
+30. Keep fitter selection `NOT_SELECTED`; optionally freeze one separate user-declared constant
+    benchmark after design creation and before forecast origin.
+31. Preserve that benchmark as `PRODUCED_UNCALIBRATED_BASELINE`, with no training observations,
+    calibration, empirical validity, residual scoring, or learning update.
+32. Before forecast origin, predeclare eligible readback observer frames, an observed-time window
+    strictly after the horizon, and a ledger-admission cutoff.
+33. Admit later manual observations while preserving both their observed times and ledger-admission
+    times.
+34. After the cutoff, deterministically select exactly one compatible readback or abstain on zero or
+    multiple matches without ranking, aggregation, or post-hoc choice.
+35. Retain the digest-bound selection with unit equivalence unverified and no residual,
+    fitter-validity, weighting, future-admissibility, or learning update.
+36. In the separate no-baseline branch, bind a later observation to the earlier scenario run and
+    retain the existing ineligible-baseline abstention.
 
 This slice uses manual, synthetic input only. Cartographic, fitter, belief, and scenario execution is
 local and deterministic; the workbench has no write endpoint and refuses non-loopback bindings.
@@ -91,14 +98,22 @@ readback, but the
 reference scenario run has `prediction_state: NOT_REQUESTED`; therefore the forecast baseline is
 `NOT_AVAILABLE`, residual is `NOT_COMPUTED`, validity and weighting updates are `NOT_APPLIED`, and
 learning is `NOT_STARTED`. Together these are prerequisite gates, not the full Phase 8 residual
-loop. Bayesian and belief outputs are explicitly diagnostic rather than truth probabilities.
+loop. Phase 8C can instead freeze one finite, user-declared constant before forecast origin. The
+reference method uses no training observations and records `PRODUCED_UNCALIBRATED_BASELINE`, while
+calibration and empirical validity remain `NOT_ESTABLISHED`. Residual scoring remains `NOT_ENABLED`;
+when this baseline exists, the Phase 8A no-baseline readback command fails closed until a separate
+scoring contract is implemented. Phase 8D preregisters a deterministic exactly-one readback
+aperture. It separates observation time from ledger-admission time and abstains on zero or multiple
+compatible observations. Even one selected observation remains `NOT_COMPUTED` for residuals and
+cannot update validity or learning. Bayesian and belief outputs are explicitly diagnostic rather than
+truth probabilities.
 Scenario branches are
 user-defined conditional structures: likelihood is `NOT_COMPUTED`, trajectories are
 `NOT_SIMULATED`, and the unknown/unmodeled region remains visible. Phase 7 ranking is an ordinal
 structural heuristic over user-supplied, unvalidated expected effects; it does not compute expected
 information gain, source feasibility, source independence, or probabilities. The slice performs no
-network collection, entity merging, automated claim extraction, forecasting, targeting, or external
-action.
+network collection, entity merging, automated claim extraction, learned or external forecasting,
+targeting, or external action.
 A claim remains unresolved even when evidence is linked, and repeated dependent evidence is never
 counted as independent corroboration. Candidate resolution is review history only: it never performs
 a canonical entity merge.
@@ -114,7 +129,7 @@ make demo
 make workbench
 ```
 
-`make workbench` creates the closed synthetic Phase 8B ledger in a temporary directory and serves
+`make workbench` creates the closed synthetic Phase 8D ledger in a temporary directory and serves
 the bounded workbench at `http://127.0.0.1:4173`. It takes no external action and removes the
 temporary ledger when stopped.
 
@@ -153,6 +168,24 @@ uv run readin create-forecast-evaluation-design --ledger .readin/events.jsonl \
   --unit <unit> --training-cutoff <ISO-8601-cutoff-before-forecast-origin>
 uv run readin show-forecast-evaluation-design --ledger .readin/events.jsonl \
   --design <forecast-evaluation-design-id>
+# Phase 8C baseline branch:
+uv run readin run-forecast-baseline --ledger .readin/events.jsonl \
+  --design <forecast-evaluation-design-id> --value <finite-number> \
+  --occurred-at <ISO-8601-time-before-forecast-origin>
+uv run readin show-forecast-baseline --ledger .readin/events.jsonl \
+  --baseline <forecast-baseline-id>
+# Phase 8D readback selection branch, preregistered before forecast origin:
+uv run readin create-readback-selection-plan --ledger .readin/events.jsonl \
+  --baseline <forecast-baseline-id> --name "Readback aperture" \
+  --frame <observer-frame-id> --observed-window-end <ISO-8601-time-after-horizon> \
+  --ledger-admission-cutoff <ISO-8601-time-at-or-after-window-end> \
+  --occurred-at <ISO-8601-time-before-forecast-origin>
+uv run readin run-readback-selection --ledger .readin/events.jsonl \
+  --plan <readback-selection-plan-id> \
+  --occurred-at <ISO-8601-time-at-or-after-admission-cutoff>
+uv run readin show-readback-selection-run --ledger .readin/events.jsonl \
+  --run <readback-selection-run-id>
+# Phase 8A no-baseline branch only; omit run-forecast-baseline:
 uv run readin run-residual-readback --ledger .readin/events.jsonl \
   --scenario-run <scenario-run-id> --observation <later-observation-id>
 uv run readin show-residual-readback --ledger .readin/events.jsonl \

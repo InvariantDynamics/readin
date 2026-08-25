@@ -12,6 +12,7 @@ from readin.synthetic import (
     phase5_events,
     phase7_events,
     phase8_events,
+    phase8d_events,
 )
 
 
@@ -406,6 +407,127 @@ def test_cli_creates_and_exposes_forecast_evaluation_design_without_prediction(
     assert result == 0
     assert output["design"]["target"]["structured_field_path"] == ["outcome"]
     assert output["forecast_execution_state"] == "NOT_STARTED"
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_freezes_and_exposes_uncalibrated_forecast_baseline(
+    tmp_path: Path, capsys: object
+) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase8_events()[:41]:
+        ledger.append(event)
+
+    result = main(
+        [
+            "run-forecast-baseline",
+            "--ledger",
+            str(ledger.path),
+            "--design",
+            "a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a0",
+            "--value",
+            "0.6",
+            "--baseline-id",
+            "d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2",
+            "--occurred-at",
+            "2026-08-21T12:00:39Z",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["baseline"]["prediction"]["value"] == 0.6
+    assert output["baseline"]["prediction"]["prediction_state"] == (
+        "PRODUCED_UNCALIBRATED_BASELINE"
+    )
+    assert output["baseline"]["input_boundary"]["selected_input_observation_ids"] == []
+    assert output["baseline"]["residual_scoring_state"] == "NOT_ENABLED"
+    assert output["baseline"]["execution_receipt"]["network_access"] is False
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+    result = main(
+        [
+            "show-forecast-baseline",
+            "--ledger",
+            str(ledger.path),
+            "--baseline",
+            "d2d2d2d2-d2d2-42d2-82d2-d2d2d2d2d2d2",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["baseline"]["method"]["name"] == "USER_DECLARED_CONSTANT"
+    assert output["calibration_state"] == "NOT_ESTABLISHED"
+    assert output["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_creates_runs_and_exposes_readback_selection(tmp_path: Path, capsys: object) -> None:
+    fixture = phase8d_events()
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in fixture[:42]:
+        ledger.append(event)
+
+    result = main(
+        [
+            "create-readback-selection-plan",
+            "--ledger",
+            str(ledger.path),
+            "--baseline",
+            "c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c0",
+            "--name",
+            "CLI readback aperture",
+            "--frame",
+            "91919191-9191-4191-8191-919191919191",
+            "--observed-window-end",
+            "2026-09-23T00:00:00Z",
+            "--ledger-admission-cutoff",
+            "2026-09-23T12:00:00Z",
+            "--plan-id",
+            "d0d0d0d0-d0d0-40d0-80d0-d0d0d0d0d0d0",
+            "--occurred-at",
+            "2026-08-21T12:00:40Z",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["plan"]["selection_policy"]["cardinality"] == "EXACTLY_ONE"
+    assert output["run"] is None
+
+    for event in fixture[43:45]:
+        ledger.append(event)
+    result = main(
+        [
+            "run-readback-selection",
+            "--ledger",
+            str(ledger.path),
+            "--plan",
+            "d0d0d0d0-d0d0-40d0-80d0-d0d0d0d0d0d0",
+            "--run-id",
+            "d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d0",
+            "--occurred-at",
+            "2026-09-23T12:00:01Z",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["run"]["selection_state"] == "UNIQUE_MATCH_SELECTED"
+    assert output["run"]["residual_state"] == "NOT_COMPUTED"
+    assert output["run"]["execution_receipt"]["network_access"] is False
+
+    result = main(
+        [
+            "show-readback-selection-run",
+            "--ledger",
+            str(ledger.path),
+            "--run",
+            "d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d0",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["selected_observation"]["id"] == ("a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2")
+    assert output["residual_scoring_state"] == "NOT_ENABLED"
     assert output["authority_state"] == "NO_AUTHORITY"
 
 

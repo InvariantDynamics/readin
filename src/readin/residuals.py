@@ -107,6 +107,32 @@ def build_residual_snapshot(
     if len(design_ids) != 1:
         raise ResidualRuntimeError("scenario has multiple forecast evaluation designs")
     forecast_evaluation_design = deepcopy(projection.forecast_evaluation_designs[design_ids[0]])
+    baseline_ids = sorted(
+        baseline_id
+        for baseline_id, baseline in projection.forecast_baselines.items()
+        if baseline["forecast_evaluation_design_id"] == forecast_evaluation_design["id"]
+    )
+    if baseline_ids:
+        baseline_id = baseline_ids[0]
+        plan_id = projection._baseline_readback_selection_plan.get(baseline_id)
+        if plan_id is None:
+            raise ResidualRuntimeError(
+                "forecast baseline exists, but Phase 8C residual scoring is not enabled"
+            )
+        selection_run_id = projection._plan_readback_selection_run.get(plan_id)
+        if selection_run_id is None:
+            raise ResidualRuntimeError(
+                "forecast readback selection has not completed; residual scoring is not enabled"
+            )
+        selection_run = projection.readback_selection_runs[selection_run_id]
+        if selection_run["selection_state"] != "UNIQUE_MATCH_SELECTED":
+            raise ResidualRuntimeError(
+                "forecast readback selection abstained: "
+                f"{selection_run['selection_state']}; residual scoring is not enabled"
+            )
+        raise ResidualRuntimeError(
+            "Phase 8D selected a unique readback observation, but residual scoring is not enabled"
+        )
     target = forecast_evaluation_design["target"]
     mismatched_observation_ids = sorted(
         item["id"]

@@ -15,6 +15,8 @@ from readin.synthetic import (
     phase5_events,
     phase7_events,
     phase8_events,
+    phase8c_events,
+    phase8d_events,
 )
 
 
@@ -194,6 +196,88 @@ def test_phase8_contract_rejects_residual_and_validity_promotion() -> None:
     validity_event["payload"]["residual_readback"]["validity_update_state"] = "APPLIED"
     with pytest.raises(ContractViolation, match="NOT_APPLIED"):
         validate_event(validity_event)
+
+
+def test_synthetic_phase8c_baseline_conforms_without_scoring_or_learning() -> None:
+    events = phase8c_events()
+    assert len(events) == 44
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    baseline = events[41]["payload"]["forecast_baseline"]
+    assert baseline["prediction"]["prediction_state"] == ("PRODUCED_UNCALIBRATED_BASELINE")
+    assert baseline["input_boundary"]["selected_input_observation_ids"] == []
+    assert baseline["calibration_state"] == "NOT_ESTABLISHED"
+    assert baseline["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert baseline["residual_scoring_state"] == "NOT_ENABLED"
+    assert baseline["validity_update_state"] == "NOT_APPLIED"
+    assert baseline["learning_state"] == "NOT_STARTED"
+    assert baseline["execution_receipt"]["network_access"] is False
+
+
+def test_phase8c_contract_rejects_input_scoring_and_authority_promotion() -> None:
+    selected_input = deepcopy(phase8c_events()[41])
+    selected_input["payload"]["forecast_baseline"]["input_boundary"][
+        "selected_input_observation_ids"
+    ] = ["44444444-4444-4444-8444-444444444444"]
+    with pytest.raises(ContractViolation):
+        validate_event(selected_input)
+
+    scoring = deepcopy(phase8c_events()[41])
+    scoring["payload"]["forecast_baseline"]["residual_scoring_state"] = "ENABLED"
+    with pytest.raises(ContractViolation, match="NOT_ENABLED"):
+        validate_event(scoring)
+
+    calibrated = deepcopy(phase8c_events()[41])
+    calibrated["payload"]["forecast_baseline"]["calibration_state"] = "ESTABLISHED"
+    with pytest.raises(ContractViolation, match="NOT_ESTABLISHED"):
+        validate_event(calibrated)
+
+    networked = deepcopy(phase8c_events()[41])
+    networked["payload"]["forecast_baseline"]["execution_receipt"]["network_access"] = True
+    with pytest.raises(ContractViolation, match="False was expected"):
+        validate_event(networked)
+
+
+def test_synthetic_phase8d_readback_selection_conforms_without_scoring() -> None:
+    events = phase8d_events()
+    assert len(events) == 46
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    plan = events[42]["payload"]["readback_selection_plan"]
+    run = events[45]["payload"]["readback_selection_run"]
+    assert plan["selection_policy"]["cardinality"] == "EXACTLY_ONE"
+    assert plan["selection_policy"]["aggregation_policy"] == "PROHIBITED"
+    assert plan["selection_policy"]["post_hoc_selection_policy"] == "PROHIBITED"
+    assert run["selection_state"] == "UNIQUE_MATCH_SELECTED"
+    assert run["residual_state"] == "NOT_COMPUTED"
+    assert run["residual_scoring_state"] == "NOT_ENABLED"
+    assert run["calibration_state"] == "NOT_ESTABLISHED"
+    assert run["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert run["validity_update_state"] == "NOT_APPLIED"
+    assert run["execution_receipt"]["network_access"] is False
+
+
+def test_phase8d_contract_rejects_aggregation_scoring_and_network_promotion() -> None:
+    aggregation = deepcopy(phase8d_events()[42])
+    aggregation["payload"]["readback_selection_plan"]["selection_policy"]["aggregation_policy"] = (
+        "AVERAGE"
+    )
+    with pytest.raises(ContractViolation, match="PROHIBITED"):
+        validate_event(aggregation)
+
+    scoring = deepcopy(phase8d_events()[45])
+    scoring["payload"]["readback_selection_run"]["residual_state"] = "COMPUTED"
+    with pytest.raises(ContractViolation, match="NOT_COMPUTED"):
+        validate_event(scoring)
+
+    networked = deepcopy(phase8d_events()[45])
+    networked["payload"]["readback_selection_run"]["execution_receipt"]["network_access"] = True
+    with pytest.raises(ContractViolation, match="False was expected"):
+        validate_event(networked)
 
 
 def test_closed_event_rejects_unknown_field() -> None:
