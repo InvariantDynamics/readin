@@ -1,4 +1,4 @@
-"""Typed event factories for the READIN Phase 0 through Phase 8D contracts."""
+"""Typed event factories for the READIN Phase 0 through Phase 8E contracts."""
 
 from __future__ import annotations
 
@@ -860,6 +860,21 @@ def create_forecast_readback_selection_completed(
     return _event(
         "forecast.readback_selection_completed",
         {"readback_selection_run": dict(run)},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_forecast_residual_computed(
+    result: Mapping[str, Any],
+    *,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    return _event(
+        "forecast.residual_computed",
+        {"forecast_residual": dict(result)},
         event_id=event_id,
         occurred_at=event_time,
     )

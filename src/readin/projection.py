@@ -1,4 +1,4 @@
-"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 8D ledger."""
+"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 8E ledger."""
 
 from __future__ import annotations
 
@@ -28,6 +28,13 @@ from readin.fitters import (
     reference_fit_components,
     reference_fitter_spec,
     validate_reference_descriptor,
+)
+from readin.forecast_residuals import (
+    FORECAST_RESIDUAL_ALGORITHM_ID,
+    ForecastResidualError,
+    build_forecast_residual_snapshot,
+    compute_forecast_residual_components,
+    forecast_residual_implementation_sha256,
 )
 from readin.forecasting import (
     FORECAST_BASELINE_ALGORITHM_ID,
@@ -100,6 +107,8 @@ class ReadinProjection:
         self.readback_selection_plans: dict[str, dict[str, Any]] = {}
         self.readback_selection_runs: dict[str, dict[str, Any]] = {}
         self.readback_selection_receipts: dict[str, dict[str, Any]] = {}
+        self.forecast_residuals: dict[str, dict[str, Any]] = {}
+        self.forecast_residual_receipts: dict[str, dict[str, Any]] = {}
         self.residual_readbacks: dict[str, dict[str, Any]] = {}
         self.residual_receipts: dict[str, dict[str, Any]] = {}
         self.asset_versions: dict[str, list[dict[str, Any]]] = {}
@@ -124,6 +133,7 @@ class ReadinProjection:
         self._design_forecast_baseline: dict[str, str] = {}
         self._baseline_readback_selection_plan: dict[str, str] = {}
         self._plan_readback_selection_run: dict[str, str] = {}
+        self._selection_run_forecast_residual: dict[str, str] = {}
         self._scenario_readback: dict[str, str] = {}
         self._events: list[dict[str, Any]] = []
 
@@ -1263,6 +1273,91 @@ class ReadinProjection:
         self._plan_readback_selection_run[plan_id] = run_id
         self._advance_asset(asset_id, event)
 
+    def _apply_forecast_residual_computed(self, event: dict[str, Any]) -> None:
+        result = deepcopy(event["payload"]["forecast_residual"])
+        result_id = result["id"]
+        receipt = result["execution_receipt"]
+        receipt_id = receipt["id"]
+        if result_id in self.forecast_residuals:
+            raise ProjectionError(f"duplicate forecast residual id: {result_id}")
+        if receipt_id in self.forecast_residual_receipts:
+            raise ProjectionError(f"duplicate forecast residual receipt id: {receipt_id}")
+        selection_run_id = result["readback_selection_run_id"]
+        if selection_run_id not in self.readback_selection_runs:
+            raise ProjectionError(
+                f"forecast residual references unknown selection run: {selection_run_id}"
+            )
+        if selection_run_id in self._selection_run_forecast_residual:
+            raise ProjectionError("readback selection run already has a forecast residual")
+        selection_run = self.readback_selection_runs[selection_run_id]
+        identity_fields = {
+            "asset_entity_id": selection_run["asset_entity_id"],
+            "readback_selection_plan_id": selection_run["readback_selection_plan_id"],
+            "forecast_baseline_id": selection_run["forecast_baseline_id"],
+            "forecast_evaluation_design_id": selection_run["forecast_evaluation_design_id"],
+            "scenario_id": selection_run["scenario_id"],
+            "selected_observation_id": selection_run["selected_observation_id"],
+        }
+        if any(result[key] != expected for key, expected in identity_fields.items()):
+            raise ProjectionError("forecast residual identity binding mismatch")
+        if receipt["forecast_residual_id"] != result_id:
+            raise ProjectionError("forecast residual receipt identity mismatch")
+        if receipt["readback_selection_run_id"] != selection_run_id:
+            raise ProjectionError("forecast residual receipt selection-run mismatch")
+        if any(receipt[key] != expected for key, expected in identity_fields.items()):
+            raise ProjectionError("forecast residual receipt input identity mismatch")
+        asset_id = selection_run["asset_entity_id"]
+        if receipt["asset_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("forecast residual asset state version mismatch")
+        if not (result["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("forecast residual times must match ledger-recorded time")
+        if self._parse_timestamp(result["recorded_at"]) < self._parse_timestamp(
+            selection_run["recorded_at"]
+        ):
+            raise ProjectionError("forecast residual precedes readback selection")
+
+        try:
+            snapshot = build_forecast_residual_snapshot(self, selection_run_id)
+            components = compute_forecast_residual_components(snapshot)
+        except ForecastResidualError as error:
+            raise ProjectionError(str(error)) from error
+        observation = snapshot["selected_observation"]
+        expected_receipt_fields = {
+            "selected_evidence_manifest_id": observation["source_artifact_id"],
+            "selected_observer_frame_id": observation["observer_frame_id"],
+            "readback_selection_run_sha256": canonical_sha256(selection_run),
+            "readback_selection_plan_sha256": canonical_sha256(snapshot["selection_plan"]),
+            "forecast_baseline_sha256": canonical_sha256(snapshot["forecast_baseline"]),
+            "forecast_evaluation_design_sha256": canonical_sha256(
+                snapshot["forecast_evaluation_design"]
+            ),
+            "scenario_sha256": canonical_sha256(snapshot["scenario"]),
+            "selected_observation_sha256": canonical_sha256(observation),
+            "selected_evidence_manifest_sha256": canonical_sha256(
+                snapshot["selected_evidence_manifest"]
+            ),
+            "selected_observer_frame_sha256": canonical_sha256(snapshot["selected_observer_frame"]),
+            "input_snapshot_sha256": canonical_sha256(snapshot),
+            "algorithm_id": FORECAST_RESIDUAL_ALGORITHM_ID,
+            "implementation_sha256": forecast_residual_implementation_sha256(),
+            "outcome_sha256": canonical_sha256(components),
+        }
+        mismatched = [
+            key for key, expected in expected_receipt_fields.items() if receipt[key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"forecast residual receipt binding mismatch: {mismatched}")
+        for key, expected in components.items():
+            if result[key] != expected:
+                raise ProjectionError(
+                    f"forecast residual {key} does not match reference arithmetic"
+                )
+
+        self.forecast_residuals[result_id] = result
+        self.forecast_residual_receipts[receipt_id] = receipt
+        self._selection_run_forecast_residual[selection_run_id] = result_id
+        self._advance_asset(asset_id, event)
+
     def _apply_forecast_evaluation_design_created(self, event: dict[str, Any]) -> None:
         design = deepcopy(event["payload"]["forecast_evaluation_design"])
         design_id = design["id"]
@@ -1740,6 +1835,17 @@ class ReadinProjection:
         readback_selection_plans.sort(
             key=lambda item: (item["plan"]["created_at"], item["plan"]["id"])
         )
+        forecast_residuals = [
+            self.forecast_residual_view(result_id)
+            for result_id, result in self.forecast_residuals.items()
+            if result["asset_entity_id"] == entity_id
+        ]
+        forecast_residuals.sort(
+            key=lambda item: (
+                item["forecast_residual"]["recorded_at"],
+                item["forecast_residual"]["id"],
+            )
+        )
         residual_readbacks = [
             self.residual_readback_view(readback_id)
             for readback_id, readback in self.residual_readbacks.items()
@@ -1782,6 +1888,7 @@ class ReadinProjection:
             "forecast_evaluation_designs": forecast_evaluation_designs,
             "forecast_baselines": forecast_baselines,
             "readback_selection_plans": readback_selection_plans,
+            "forecast_residuals": forecast_residuals,
             "residual_readbacks": residual_readbacks,
             "evidence_dependencies": dependencies,
             "observer_frames": [deepcopy(self.frames[item]) for item in frame_ids],
@@ -2363,6 +2470,32 @@ class ReadinProjection:
             "authority_state": "NO_AUTHORITY",
         }
 
+    def forecast_residual_view(self, forecast_residual_id: str) -> dict[str, Any]:
+        if forecast_residual_id not in self.forecast_residuals:
+            raise ProjectionError(f"unknown forecast residual: {forecast_residual_id}")
+        result = deepcopy(self.forecast_residuals[forecast_residual_id])
+        selection_run = deepcopy(self.readback_selection_runs[result["readback_selection_run_id"]])
+        plan = deepcopy(self.readback_selection_plans[result["readback_selection_plan_id"]])
+        observation = deepcopy(self.observations[result["selected_observation_id"]])
+        return {
+            "forecast_residual": result,
+            "readback_selection_run": selection_run,
+            "readback_selection_plan": plan,
+            "forecast_baseline": deepcopy(self.forecast_baselines[result["forecast_baseline_id"]]),
+            "forecast_evaluation_design": deepcopy(
+                self.forecast_evaluation_designs[result["forecast_evaluation_design_id"]]
+            ),
+            "scenario": deepcopy(self.scenarios[result["scenario_id"]]),
+            "selected_observation": observation,
+            "selected_observer_frame": deepcopy(self.frames[observation["observer_frame_id"]]),
+            "selected_evidence_manifest": deepcopy(
+                self.evidence[observation["source_artifact_id"]]
+            ),
+            "calibration_state": "NOT_ESTABLISHED",
+            "empirical_validity_state": "NOT_ESTABLISHED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
     def resolution_candidate_view(self, candidate_id: str) -> dict[str, Any]:
         if candidate_id not in self.resolution_candidates:
             raise ProjectionError(f"unknown resolution candidate: {candidate_id}")
@@ -2563,6 +2696,8 @@ class ReadinProjection:
             return {payload["readback_selection_plan"]["asset_entity_id"]}
         if event_type == "forecast.readback_selection_completed":
             return {payload["readback_selection_run"]["asset_entity_id"]}
+        if event_type == "forecast.residual_computed":
+            return {payload["forecast_residual"]["asset_entity_id"]}
         if event_type == "residual.readback_completed":
             return {payload["residual_readback"]["asset_entity_id"]}
         if event_type == "evidence.linked":
@@ -2623,6 +2758,8 @@ class ReadinProjection:
             return event["payload"]["readback_selection_plan"]["created_at"]
         if event_type == "forecast.readback_selection_completed":
             return event["payload"]["readback_selection_run"]["recorded_at"]
+        if event_type == "forecast.residual_computed":
+            return event["payload"]["forecast_residual"]["recorded_at"]
         if event_type == "residual.readback_completed":
             return event["payload"]["residual_readback"]["recorded_at"]
         return event["occurred_at"]
@@ -2697,6 +2834,10 @@ class ReadinProjection:
                 "readback_selection_run_count": sum(
                     entity_id == run["asset_entity_id"]
                     for run in self.readback_selection_runs.values()
+                ),
+                "forecast_residual_count": sum(
+                    entity_id == result["asset_entity_id"]
+                    for result in self.forecast_residuals.values()
                 ),
                 "residual_readback_count": sum(
                     entity_id == readback["asset_entity_id"]

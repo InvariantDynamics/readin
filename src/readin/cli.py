@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 through Phase 8D runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 8E runtime."""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
+from readin.forecast_residuals import ForecastResidualError, execute_forecast_residual
 from readin.forecasting import (
     ForecastBaselineError,
     ForecastDesignError,
@@ -514,6 +515,15 @@ def _build_parser() -> argparse.ArgumentParser:
     readback_run_parser.add_argument("--run-id")
     readback_run_parser.add_argument("--occurred-at")
 
+    forecast_residual_parser = subparsers.add_parser(
+        "run-forecast-residual",
+        help="Compute descriptive residual arithmetic for one unique readback selection",
+    )
+    _add_ledger_argument(forecast_residual_parser)
+    forecast_residual_parser.add_argument("--selection-run", required=True)
+    forecast_residual_parser.add_argument("--residual-id")
+    forecast_residual_parser.add_argument("--occurred-at")
+
     residual_parser = subparsers.add_parser(
         "run-residual-readback",
         help="Bind later observations and abstain when no forecast baseline exists",
@@ -648,6 +658,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_ledger_argument(readback_run_view_parser)
     readback_run_view_parser.add_argument("--run", required=True)
+
+    forecast_residual_view_parser = subparsers.add_parser(
+        "show-forecast-residual",
+        help="Inspect one descriptive reference residual and its receipt",
+    )
+    _add_ledger_argument(forecast_residual_view_parser)
+    forecast_residual_view_parser.add_argument("--residual", required=True)
 
     residual_view_parser = subparsers.add_parser(
         "show-residual-readback",
@@ -1057,6 +1074,18 @@ def _run(args: argparse.Namespace) -> Any:
         run_id = event["payload"]["readback_selection_run"]["id"]
         return ledger.projection().readback_selection_run_view(run_id)
 
+    if args.command == "run-forecast-residual":
+        projection = ledger.projection()
+        event = execute_forecast_residual(
+            projection,
+            args.selection_run,
+            forecast_residual_id=args.residual_id,
+            occurred_at=args.occurred_at,
+        )
+        ledger.append(event)
+        result_id = event["payload"]["forecast_residual"]["id"]
+        return ledger.projection().forecast_residual_view(result_id)
+
     if args.command == "run-residual-readback":
         projection = ledger.projection()
         event = execute_residual_readback(
@@ -1117,6 +1146,8 @@ def _run(args: argparse.Namespace) -> Any:
         return projection.readback_selection_plan_view(args.plan)
     if args.command == "show-readback-selection-run":
         return projection.readback_selection_run_view(args.run)
+    if args.command == "show-forecast-residual":
+        return projection.forecast_residual_view(args.residual)
     if args.command == "show-residual-readback":
         return projection.residual_readback_view(args.readback)
     if args.command == "list-assets":
@@ -1139,6 +1170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         FitterRuntimeError,
         ForecastBaselineError,
         ForecastDesignError,
+        ForecastResidualError,
         KeyError,
         LedgerError,
         ProjectionError,

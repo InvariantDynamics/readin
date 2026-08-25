@@ -1,4 +1,4 @@
-"""Read-only workbench through bounded Phase 8D readback selection."""
+"""Read-only workbench through bounded Phase 8E descriptive residual arithmetic."""
 
 from __future__ import annotations
 
@@ -391,6 +391,40 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             ),
         }
 
+    forecast_residual = None
+    if view["forecast_residuals"]:
+        item = view["forecast_residuals"][-1]
+        result = item["forecast_residual"]
+        forecast_residual = {
+            "id": result["id"],
+            "readback_selection_run_id": result["readback_selection_run_id"],
+            "selected_observation_id": result["selected_observation_id"],
+            "selected_observer_frame_name": item["selected_observer_frame"]["name"],
+            "prediction_value": result["score"]["prediction_value"],
+            "observed_value": result["score"]["observed_value"],
+            "signed_residual": result["score"]["signed_residual"],
+            "absolute_error": result["score"]["absolute_error"],
+            "unit": result["score"]["unit"],
+            "unit_match_state": result["score"]["unit_match_state"],
+            "metric_name": result["metric"]["name"],
+            "metric_state": result["metric"]["metric_state"],
+            "residual_definition": result["metric"]["residual_definition"],
+            "residual_state": result["residual_state"],
+            "residual_scoring_state": result["residual_scoring_state"],
+            "baseline_state": result["baseline_state"],
+            "sample_count": result["sample_count"],
+            "uncertainty_state": result["uncertainty_state"],
+            "calibration_state": result["calibration_state"],
+            "empirical_validity_state": result["empirical_validity_state"],
+            "validity_update_state": result["validity_update_state"],
+            "weighting_update_state": result["weighting_update_state"],
+            "future_admissibility_update_state": result["future_admissibility_update_state"],
+            "learning_state": result["learning_state"],
+            "interpretation": result["interpretation"],
+            "network_access": result["execution_receipt"]["network_access"],
+            "recorded_at": result["recorded_at"],
+        }
+
     residual_readback = None
     if view["residual_readbacks"]:
         item = view["residual_readbacks"][-1]
@@ -453,6 +487,7 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "readback_selection_runs": sum(
                 item["run"] is not None for item in view["readback_selection_plans"]
             ),
+            "forecast_residuals": len(view["forecast_residuals"]),
             "residual_readbacks": len(view["residual_readbacks"]),
             "timeline_events": len(timeline),
         },
@@ -517,6 +552,7 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
         "readback": {
             "latest": residual_readback,
             "latest_selection": readback_selection,
+            "latest_forecast_residual": forecast_residual,
         },
         "timeline": [
             {
@@ -569,7 +605,11 @@ def build_workbench_snapshot(
             "collection_state": "NOT_STARTED",
             "acquisition_state": "NOT_ATTEMPTED",
             "source_independence_state": "NOT_ESTABLISHED",
-            "residual_state": "NOT_COMPUTED",
+            "residual_state": (
+                "COMPUTED_DESCRIPTIVE_REFERENCE_ONLY"
+                if projection.forecast_residuals
+                else "NOT_COMPUTED"
+            ),
             "validity_update_state": "NOT_APPLIED",
             "learning_state": "NOT_STARTED",
         },

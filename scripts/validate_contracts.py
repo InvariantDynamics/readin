@@ -1,4 +1,4 @@
-"""Validate the schema, Phase 8D readback selection, and fail-closed vectors."""
+"""Validate the schema, Phase 8E descriptive residual, and fail-closed vectors."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from readin.contracts import ContractViolation, load_event_schema, validate_even
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
 from readin.residuals import ResidualRuntimeError, build_residual_snapshot
-from readin.synthetic import phase8_events, phase8d_events
+from readin.synthetic import phase8_events, phase8e_events
 from readin.workbench import WorkbenchError, build_workbench_snapshot, validate_loopback_host
 
 
@@ -25,7 +25,7 @@ def _must_reject_contract(event: dict[str, object]) -> None:
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
-    events = phase8d_events()
+    events = phase8e_events()
     residual_events = phase8_events()
     for event in events:
         validate_event(event)
@@ -115,6 +115,30 @@ def main() -> None:
         "network_access"
     ] = True
     _must_reject_contract(invalid_selection_network)
+
+    invalid_forecast_residual_calibration = deepcopy(events[46])
+    invalid_forecast_residual_calibration["payload"]["forecast_residual"]["calibration_state"] = (
+        "ESTABLISHED"
+    )
+    _must_reject_contract(invalid_forecast_residual_calibration)
+
+    invalid_forecast_residual_validity = deepcopy(events[46])
+    invalid_forecast_residual_validity["payload"]["forecast_residual"]["validity_update_state"] = (
+        "APPLIED"
+    )
+    _must_reject_contract(invalid_forecast_residual_validity)
+
+    invalid_forecast_residual_unit = deepcopy(events[46])
+    invalid_forecast_residual_unit["payload"]["forecast_residual"]["score"]["unit_match_state"] = (
+        "VERIFIED"
+    )
+    _must_reject_contract(invalid_forecast_residual_unit)
+
+    invalid_forecast_residual_network = deepcopy(events[46])
+    invalid_forecast_residual_network["payload"]["forecast_residual"]["execution_receipt"][
+        "network_access"
+    ] = True
+    _must_reject_contract(invalid_forecast_residual_network)
 
     try:
         ReadinProjection.replay([events[4]])
@@ -353,11 +377,49 @@ def main() -> None:
     else:
         raise AssertionError("readback selection with an invalid snapshot digest was accepted")
 
+    invalid_forecast_residual_receipt = deepcopy(events[46])
+    invalid_forecast_residual_receipt["payload"]["forecast_residual"]["execution_receipt"][
+        "input_snapshot_sha256"
+    ] = "0" * 64
+    try:
+        ReadinProjection.replay([*events[:46], invalid_forecast_residual_receipt])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("forecast residual with an invalid snapshot digest was accepted")
+
+    invalid_forecast_residual_arithmetic = deepcopy(events[46])
+    invalid_forecast_residual_arithmetic["payload"]["forecast_residual"]["score"][
+        "absolute_error"
+    ] = 0.5
+    try:
+        ReadinProjection.replay([*events[:46], invalid_forecast_residual_arithmetic])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("non-reference forecast residual arithmetic was accepted")
+
     baseline_view = projection.forecast_baseline_view("c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c0")
     if baseline_view["baseline"]["residual_scoring_state"] != "NOT_ENABLED":
         raise AssertionError("forecast baseline enabled residual scoring")
     if baseline_view["baseline"]["execution_receipt"]["network_access"]:
         raise AssertionError("forecast baseline acquired network access")
+    forecast_residual_view = projection.forecast_residual_view(
+        "e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e0"
+    )
+    forecast_residual = forecast_residual_view["forecast_residual"]
+    if forecast_residual["score"]["signed_residual"] != 0.25:
+        raise AssertionError("forecast residual did not preserve signed arithmetic")
+    if forecast_residual["residual_state"] != "COMPUTED_DESCRIPTIVE_REFERENCE_ONLY":
+        raise AssertionError("forecast residual exceeded its descriptive boundary")
+    if forecast_residual["calibration_state"] != "NOT_ESTABLISHED":
+        raise AssertionError("single readback promoted forecast calibration")
+    if forecast_residual["validity_update_state"] != "NOT_APPLIED":
+        raise AssertionError("descriptive residual changed fitter validity")
+    if forecast_residual["learning_state"] != "NOT_STARTED":
+        raise AssertionError("descriptive residual initiated learning")
+    if forecast_residual["execution_receipt"]["network_access"]:
+        raise AssertionError("forecast residual acquired network access")
     try:
         build_residual_snapshot(
             projection,
@@ -367,7 +429,7 @@ def main() -> None:
     except ResidualRuntimeError:
         pass
     else:
-        raise AssertionError("Phase 8D selection was scored without a residual contract")
+        raise AssertionError("Phase 8A path accepted a baseline-bound forecast residual")
 
     invalid_residual = deepcopy(residual_events[43])
     invalid_residual["payload"]["residual_readback"]["execution_receipt"][
@@ -419,6 +481,13 @@ def main() -> None:
         raise AssertionError("workbench promoted readback selection to residual scoring")
     if selection["aggregation_state"] != "NOT_PERFORMED":
         raise AssertionError("workbench aggregated readback observations")
+    workbench_residual = workbench["selected_asset"]["readback"]["latest_forecast_residual"]
+    if workbench_residual["absolute_error"] != 0.25:
+        raise AssertionError("workbench suppressed descriptive residual arithmetic")
+    if workbench_residual["empirical_validity_state"] != "NOT_ESTABLISHED":
+        raise AssertionError("workbench promoted one residual to empirical validity")
+    if workbench_residual["learning_state"] != "NOT_STARTED":
+        raise AssertionError("workbench promoted descriptive arithmetic to learning")
     readback_workbench = build_workbench_snapshot(
         residual_projection, "11111111-1111-4111-8111-111111111111"
     )
@@ -447,7 +516,7 @@ def main() -> None:
     print(
         f"PASS schemas=1 positive_events={len(events)} "
         f"residual_fixture_events={len(residual_events)} "
-        f"negative_contract_vectors=17 negative_semantic_vectors=21 "
+        f"negative_contract_vectors=21 negative_semantic_vectors=23 "
         f"tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
         f"resolution_candidates={len(projection.resolution_candidates)} "
@@ -463,6 +532,7 @@ def main() -> None:
         f"forecast_baselines={len(projection.forecast_baselines)} "
         f"readback_selection_plans={len(projection.readback_selection_plans)} "
         f"readback_selection_runs={len(projection.readback_selection_runs)} "
+        f"forecast_residuals={len(projection.forecast_residuals)} "
         f"residual_readbacks={len(projection.residual_readbacks)} "
         "workbench_contracts=1 negative_workbench_vectors=2"
     )

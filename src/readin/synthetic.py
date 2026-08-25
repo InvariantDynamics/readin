@@ -32,6 +32,7 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
+from readin.forecast_residuals import execute_forecast_residual
 from readin.forecasting import (
     create_forecast_evaluation_design,
     execute_frozen_forecast_baseline,
@@ -881,6 +882,24 @@ def phase8d_events() -> list[dict[str, Any]]:
             receipt_id="d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1",
             event_id="d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d2",
             occurred_at="2026-09-23T12:00:01Z",
+        )
+    )
+    return events
+
+
+def phase8e_events() -> list[dict[str, Any]]:
+    """Return one descriptive residual for a uniquely selected reference readback."""
+
+    events = phase8d_events()
+    projection = ReadinProjection.replay(events)
+    events.append(
+        execute_forecast_residual(
+            projection,
+            "d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d0",
+            forecast_residual_id="e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e0",
+            receipt_id="e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e1",
+            event_id="e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e2",
+            occurred_at="2026-09-23T12:00:02Z",
         )
     )
     return events

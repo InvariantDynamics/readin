@@ -13,6 +13,7 @@ from readin.synthetic import (
     phase7_events,
     phase8_events,
     phase8d_events,
+    phase8e_events,
 )
 
 
@@ -528,6 +529,58 @@ def test_cli_creates_runs_and_exposes_readback_selection(tmp_path: Path, capsys:
     assert result == 0
     assert output["selected_observation"]["id"] == ("a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2")
     assert output["residual_scoring_state"] == "NOT_ENABLED"
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_computes_and_exposes_descriptive_forecast_residual(
+    tmp_path: Path, capsys: object
+) -> None:
+    fixture = phase8e_events()
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in fixture[:46]:
+        ledger.append(event)
+
+    result = main(
+        [
+            "run-forecast-residual",
+            "--ledger",
+            str(ledger.path),
+            "--selection-run",
+            "d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d0",
+            "--residual-id",
+            "e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e0",
+            "--occurred-at",
+            "2026-09-23T12:00:02Z",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    residual = output["forecast_residual"]
+    assert residual["score"]["prediction_value"] == 0.75
+    assert residual["score"]["observed_value"] == 1.0
+    assert residual["score"]["signed_residual"] == 0.25
+    assert residual["score"]["absolute_error"] == 0.25
+    assert residual["residual_state"] == "COMPUTED_DESCRIPTIVE_REFERENCE_ONLY"
+    assert residual["validity_update_state"] == "NOT_APPLIED"
+    assert residual["execution_receipt"]["network_access"] is False
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+    result = main(
+        [
+            "show-forecast-residual",
+            "--ledger",
+            str(ledger.path),
+            "--residual",
+            "e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e0",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["forecast_residual"]["sample_count"] == 1
+    assert output["selected_observation"]["id"] == ("a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2")
+    assert output["calibration_state"] == "NOT_ESTABLISHED"
+    assert output["empirical_validity_state"] == "NOT_ESTABLISHED"
     assert output["authority_state"] == "NO_AUTHORITY"
 
 

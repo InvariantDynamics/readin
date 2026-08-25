@@ -17,6 +17,7 @@ from readin.synthetic import (
     phase8_events,
     phase8c_events,
     phase8d_events,
+    phase8e_events,
 )
 
 
@@ -276,6 +277,49 @@ def test_phase8d_contract_rejects_aggregation_scoring_and_network_promotion() ->
 
     networked = deepcopy(phase8d_events()[45])
     networked["payload"]["readback_selection_run"]["execution_receipt"]["network_access"] = True
+    with pytest.raises(ContractViolation, match="False was expected"):
+        validate_event(networked)
+
+
+def test_synthetic_phase8e_descriptive_residual_conforms_without_validity() -> None:
+    events = phase8e_events()
+    assert len(events) == 47
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    residual = events[46]["payload"]["forecast_residual"]
+    assert residual["selection_eligibility_state"] == "UNIQUE_MATCH_CONFIRMED"
+    assert residual["sample_count"] == 1
+    assert residual["score"]["signed_residual"] == 0.25
+    assert residual["score"]["absolute_error"] == 0.25
+    assert residual["residual_state"] == "COMPUTED_DESCRIPTIVE_REFERENCE_ONLY"
+    assert residual["uncertainty_state"] == "NOT_ESTIMATED_SINGLE_READBACK"
+    assert residual["calibration_state"] == "NOT_ESTABLISHED"
+    assert residual["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert residual["validity_update_state"] == "NOT_APPLIED"
+    assert residual["learning_state"] == "NOT_STARTED"
+    assert residual["execution_receipt"]["network_access"] is False
+
+
+def test_phase8e_contract_rejects_validity_unit_and_network_promotion() -> None:
+    calibrated = deepcopy(phase8e_events()[46])
+    calibrated["payload"]["forecast_residual"]["calibration_state"] = "ESTABLISHED"
+    with pytest.raises(ContractViolation, match="NOT_ESTABLISHED"):
+        validate_event(calibrated)
+
+    validity = deepcopy(phase8e_events()[46])
+    validity["payload"]["forecast_residual"]["validity_update_state"] = "APPLIED"
+    with pytest.raises(ContractViolation, match="NOT_APPLIED"):
+        validate_event(validity)
+
+    unit_verified = deepcopy(phase8e_events()[46])
+    unit_verified["payload"]["forecast_residual"]["score"]["unit_match_state"] = "VERIFIED"
+    with pytest.raises(ContractViolation, match="USER_DECLARED_NOT_VERIFIED"):
+        validate_event(unit_verified)
+
+    networked = deepcopy(phase8e_events()[46])
+    networked["payload"]["forecast_residual"]["execution_receipt"]["network_access"] = True
     with pytest.raises(ContractViolation, match="False was expected"):
         validate_event(networked)
 
