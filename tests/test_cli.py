@@ -11,6 +11,7 @@ from readin.synthetic import (
     phase3_events,
     phase5_events,
     phase7_events,
+    phase8_events,
 )
 
 
@@ -352,6 +353,104 @@ def test_cli_exposes_discrimination_run_without_acquisition(tmp_path: Path, caps
     assert output["run"]["recommendation_state"] == "RANKED_STRUCTURAL_CANDIDATES"
     assert output["run"]["acquisition_state"] == "NOT_ATTEMPTED"
     assert output["run"]["execution_receipt"]["network_access"] is False
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_creates_and_exposes_forecast_evaluation_design_without_prediction(
+    tmp_path: Path, capsys: object
+) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase7_events():
+        ledger.append(event)
+
+    result = main(
+        [
+            "create-forecast-evaluation-design",
+            "--ledger",
+            str(ledger.path),
+            "--scenario",
+            "85858585-8585-4585-8585-858585858585",
+            "--name",
+            "CLI forecast evaluation design",
+            "--observation-type",
+            "synthetic.cli_outcome",
+            "--field",
+            "outcome",
+            "--unit",
+            "synthetic_unit",
+            "--training-cutoff",
+            "2026-08-21T12:00:37Z",
+            "--design-id",
+            "d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1",
+            "--occurred-at",
+            "2026-08-21T12:00:38Z",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["design"]["preregistration_state"] == ("RECORDED_BEFORE_FORECAST_ORIGIN")
+    assert output["forecast_capable_fitter_state"] == "NO_ELIGIBLE_FITTER_REGISTERED"
+    assert output["prediction_state"] == "NOT_PRODUCED"
+
+    result = main(
+        [
+            "show-forecast-evaluation-design",
+            "--ledger",
+            str(ledger.path),
+            "--design",
+            "d1d1d1d1-d1d1-41d1-81d1-d1d1d1d1d1d1",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["design"]["target"]["structured_field_path"] == ["outcome"]
+    assert output["forecast_execution_state"] == "NOT_STARTED"
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_records_and_exposes_residual_readback_abstention(
+    tmp_path: Path, capsys: object
+) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase8_events()[:43]:
+        ledger.append(event)
+
+    result = main(
+        [
+            "run-residual-readback",
+            "--ledger",
+            str(ledger.path),
+            "--scenario-run",
+            "89898989-8989-4989-8989-898989898981",
+            "--observation",
+            "a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2",
+            "--readback-id",
+            "c1c1c1c1-c1c1-41c1-81c1-c1c1c1c1c1c1",
+            "--occurred-at",
+            "2026-09-22T12:00:02Z",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["readback"]["residual_state"] == "NOT_COMPUTED"
+    assert output["readback"]["validity_update_state"] == "NOT_APPLIED"
+    assert output["readback"]["execution_receipt"]["network_access"] is False
+
+    result = main(
+        [
+            "show-residual-readback",
+            "--ledger",
+            str(ledger.path),
+            "--readback",
+            "c1c1c1c1-c1c1-41c1-81c1-c1c1c1c1c1c1",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["forecast_baseline_state"] == "NOT_AVAILABLE"
+    assert output["learning_state"] == "NOT_STARTED"
     assert output["authority_state"] == "NO_AUTHORITY"
 
 

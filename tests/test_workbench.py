@@ -10,7 +10,7 @@ import pytest
 from readin.cli import main
 from readin.projection import ReadinProjection
 from readin.store import EventLedger
-from readin.synthetic import phase5_events, phase7_events
+from readin.synthetic import phase5_events, phase7_events, phase8_events
 from readin.workbench import (
     WorkbenchError,
     build_workbench_snapshot,
@@ -57,6 +57,9 @@ def test_workbench_projection_preserves_phase5_boundaries() -> None:
         "collection_state": "NOT_STARTED",
         "acquisition_state": "NOT_ATTEMPTED",
         "source_independence_state": "NOT_ESTABLISHED",
+        "residual_state": "NOT_COMPUTED",
+        "validity_update_state": "NOT_APPLIED",
+        "learning_state": "NOT_STARTED",
     }
 
     asset = snapshot["selected_asset"]
@@ -88,6 +91,30 @@ def test_workbench_exposes_phase7_next_observation_without_collection() -> None:
     assert collection["acquisition_state"] == "NOT_ATTEMPTED"
     assert collection["source_independence_state"] == "NOT_ESTABLISHED"
     assert collection["expected_information_gain_state"] == "NOT_COMPUTED"
+    assert snapshot["selected_asset"]["readback"]["latest"] is None
+
+
+def test_workbench_exposes_phase8_readback_without_residual_or_validity_update() -> None:
+    snapshot = build_workbench_snapshot(ReadinProjection.replay(phase8_events()), ASSET_ID)
+    readback = snapshot["selected_asset"]["readback"]["latest"]
+
+    assert snapshot["generated_from"]["event_count"] == 44
+    assert snapshot["selected_asset"]["counts"]["residual_readbacks"] == 1
+    assert snapshot["selected_asset"]["counts"]["forecast_evaluation_designs"] == 1
+    design = snapshot["selected_asset"]["forecasting"]["latest_evaluation_design"]
+    assert design["preregistration_state"] == "RECORDED_BEFORE_FORECAST_ORIGIN"
+    assert design["fitter_selection_state"] == "NOT_SELECTED"
+    assert design["prediction_state"] == "NOT_PRODUCED"
+    assert readback["scenario_name"] == "Synthetic conditional program horizon"
+    assert readback["observation_count"] == 1
+    assert readback["forecast_baseline_state"] == "NOT_AVAILABLE"
+    assert readback["baseline_eligibility_state"] == "INELIGIBLE_NO_FORECAST_BASELINE"
+    assert readback["residual_state"] == "NOT_COMPUTED"
+    assert readback["validity_update_state"] == "NOT_APPLIED"
+    assert readback["weighting_update_state"] == "NOT_APPLIED"
+    assert readback["future_admissibility_update_state"] == "NOT_APPLIED"
+    assert readback["learning_state"] == "NOT_STARTED"
+    assert readback["network_access"] is False
 
 
 def test_workbench_projection_supports_empty_catalog_and_rejects_unknown_asset() -> None:
@@ -120,6 +147,7 @@ def test_workbench_server_is_static_and_read_only(tmp_path: Path) -> None:
         assert response.status == 200
         assert "READIN Asset Workbench" in body
         assert "Next observation" in body
+        assert "Readback" in body
         assert response.getheader("Content-Security-Policy") == (
             "default-src 'self'; script-src 'self'"
         )

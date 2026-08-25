@@ -18,12 +18,15 @@ E_e(t) = (observations, claims, relations, hypotheses, beliefs,
 
 The current implementation opens the entity, tracking, frame, evidence-manifest, observation,
 dependency, claim, evidence-link, relation, historical reconstruction, and reversible candidate
-resolution layers, plus bounded cartographic, multi-fitter, belief, scenario, and
-discriminating-observation layers. These layers remain separate: an observation is never silently promoted into a claim or belief, linked evidence
+resolution layers, plus bounded cartographic, multi-fitter, belief, scenario,
+discriminating-observation, forecast-evaluation design, and residual-readback eligibility layers.
+These layers remain separate:
+an observation is never silently promoted into a claim or belief, linked evidence
 never resolves a claim by itself, a selected surface never becomes a completeness claim, a fitter
 result never becomes evidence or model authority, a categorical belief revision never becomes a
-truth probability, a scenario branch never becomes a forecast, and a ranked observation candidate
-never becomes collection authority.
+truth probability, a scenario branch never becomes a forecast, a ranked observation candidate
+never becomes collection authority, and a later observation never becomes a residual or validity
+update without an eligible forecast baseline.
 
 ## Ownership boundary
 
@@ -35,7 +38,7 @@ never becomes collection authority.
 
 ## Current event model
 
-The ledger supports twenty-two events:
+The ledger supports twenty-four events:
 
 - `entity.created`
 - `asset.tracking_started`
@@ -59,6 +62,8 @@ The ledger supports twenty-two events:
 - `scenario.run_completed`
 - `collection.discrimination_plan_created`
 - `collection.discrimination_run_completed`
+- `forecast.evaluation_design_created`
+- `residual.readback_completed`
 
 Every event is append-only, schema-validated, timestamped, uniquely identified, and marked
 `NO_AUTHORITY`. Projection fails closed when an asset or frame is unknown, an identifier is reused,
@@ -101,6 +106,13 @@ claim.created --> hypothesis.created --> belief.revision_completed
 cartography.query_planned + belief.revision_completed
                          --> collection.discrimination_plan_created
                          --> collection.discrimination_run_completed
+
+scenario.run_completed + later observation.admitted
+                         --> residual.readback_completed
+                         --> eligibility abstention when no forecast baseline exists
+
+scenario.created --> forecast.evaluation_design_created
+                  --> predeclared target + leakage boundary; no forecast execution
 ```
 
 Candidate resolution is a sidecar to entity identity, not an entity mutation. A candidate records
@@ -219,6 +231,42 @@ implementation, and outcome digest. Network access is false, collection remains 
 acquisition remains `NOT_ATTEMPTED`, source independence remains `NOT_ESTABLISHED`, and every result
 retains `NO_AUTHORITY`.
 
+## Bounded forecast-evaluation design and residual-readback eligibility
+
+Phase 8A implements the prerequisite gate for the architecture roadmap's residual loop. A readback
+binds one completed scenario run to one or more already-admitted observations concerning the same
+asset. Every selected observation must be strictly later than the scenario horizon. The receipt
+binds the scenario, scenario run, admitted observations, evidence manifests, observer frames,
+asset state version, predeclared forecast-evaluation design, reference implementation, and outcome
+digests.
+
+Phase 8B adds the preceding evaluation-design gate. Before the scenario forecast origin, a user can
+predeclare one numeric observation target, unit, absolute-error metric, residual sign convention,
+training cutoff, horizon, and post-cutoff exclusion policy. Projection derives the forecast origin
+and horizon from the bound scenario, requires the training cutoff not to follow design creation,
+and allows only one design per scenario. The target and metric remain
+`USER_DECLARED_NOT_VALIDATED` / `PREDECLARED_NOT_VALIDATED`. Fitter selection is `NOT_SELECTED`,
+forecast execution is `NOT_STARTED`, prediction is `NOT_PRODUCED`, and calibration is
+`NOT_ESTABLISHED`.
+
+Later readback observations must match the predeclared observation type and contain a numeric value
+at the declared structured-field path. The receipt binds the complete evaluation design. These
+checks establish target compatibility and temporal order only; they do not establish that any
+prediction exists.
+
+The current scenario runtime performs conditional branch evaluation with
+`prediction_state: NOT_REQUESTED`; it does not produce a forecast baseline. The eligibility
+algorithm therefore records `INELIGIBLE_NO_FORECAST_BASELINE`, retains the readback, and fixes the
+residual to `NOT_COMPUTED`. Fitter-validity, weighting, and future-admissibility updates remain
+`NOT_APPLIED`; learning remains `NOT_STARTED`. Projection recomputes the complete binding and rejects
+tampered receipts, non-later observations, cross-asset observations, missing inputs, or a second
+readback for the same scenario run.
+
+These slices do not satisfy the full Phase 8 exit condition. No forecast-capable fitter, calibrated
+prediction, residual value, validation corpus, validity update, weighting update, admissibility
+update, or empirical learning exists. The workbench Readback tab is a presentation of that
+fail-closed state, with no write control, network access, collection, or action authority.
+
 Claims are created with `epistemic_status: unresolved`. An evidence link records role or polarity,
 dependency group, warrant, appraisal, and strength as separate axes. Strength is `UNASSESSED` until
 an appraisal is completed. A `derives` link must name an artifact used by one of the claim's cited
@@ -275,6 +323,10 @@ artifact storage and live acquisition are later gated work.
 8. **Phase 7 discriminating-observation planning** — manual candidate observations, query-bound
    blind-region targets, ordinal structural ranking, ties, abstention, and no acquisition.
    *(implemented)*
+9. **Phase 8 residual loop** — bind later observations to prior forecasts, compute residuals, and
+   update fitter validity or weighting only when supported. *(Phase 8A readback eligibility and
+   Phase 8B evaluation-design prerequisites implemented; forecast, residual computation, and updates
+   not implemented)*
 
 Each slice requires its own contract, positive and negative fixtures, validation path, claim ceiling,
 and stop conditions.

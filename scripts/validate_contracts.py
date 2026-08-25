@@ -1,4 +1,4 @@
-"""Validate the schema, Phase 7 loop, and fail-closed negative vectors."""
+"""Validate the schema, Phase 8B loop, and fail-closed negative vectors."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator
 from readin.contracts import ContractViolation, load_event_schema, validate_event
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
-from readin.synthetic import phase7_events
+from readin.synthetic import phase8_events
 from readin.workbench import WorkbenchError, build_workbench_snapshot, validate_loopback_host
 
 
@@ -24,7 +24,7 @@ def _must_reject_contract(event: dict[str, object]) -> None:
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
-    events = phase7_events()
+    events = phase8_events()
     for event in events:
         validate_event(event)
     projection = ReadinProjection.replay(events)
@@ -58,6 +58,26 @@ def main() -> None:
         "COMPUTED"
     )
     _must_reject_contract(invalid_discrimination_probability)
+
+    invalid_forecast_contract = deepcopy(events[40])
+    invalid_forecast_contract["payload"]["forecast_evaluation_design"]["prediction_state"] = (
+        "PRODUCED"
+    )
+    _must_reject_contract(invalid_forecast_contract)
+
+    invalid_leakage_contract = deepcopy(events[40])
+    invalid_leakage_contract["payload"]["forecast_evaluation_design"]["timing"][
+        "post_cutoff_input_policy"
+    ] = "INCLUDE"
+    _must_reject_contract(invalid_leakage_contract)
+
+    invalid_residual_contract = deepcopy(events[43])
+    invalid_residual_contract["payload"]["residual_readback"]["residual_state"] = "COMPUTED"
+    _must_reject_contract(invalid_residual_contract)
+
+    invalid_validity_update = deepcopy(events[43])
+    invalid_validity_update["payload"]["residual_readback"]["validity_update_state"] = "APPLIED"
+    _must_reject_contract(invalid_validity_update)
 
     try:
         ReadinProjection.replay([events[4]])
@@ -246,6 +266,42 @@ def main() -> None:
     if discrimination_view["run"]["execution_receipt"]["network_access"]:
         raise AssertionError("discrimination planning acquired network access")
 
+    invalid_forecast_timing = deepcopy(events[40])
+    invalid_forecast_timing["payload"]["forecast_evaluation_design"]["timing"]["horizon_end"] = (
+        "2026-09-22T00:00:00Z"
+    )
+    try:
+        ReadinProjection.replay([*events[:40], invalid_forecast_timing])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("forecast evaluation design with horizon drift was accepted")
+
+    design_view = projection.forecast_evaluation_design_view("a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a0")
+    if design_view["forecast_capable_fitter_state"] != "NO_ELIGIBLE_FITTER_REGISTERED":
+        raise AssertionError("forecast design implied an eligible fitter")
+    if design_view["prediction_state"] != "NOT_PRODUCED":
+        raise AssertionError("forecast design promoted preregistration to prediction")
+
+    invalid_residual = deepcopy(events[43])
+    invalid_residual["payload"]["residual_readback"]["execution_receipt"][
+        "observation_snapshot_sha256"
+    ] = "0" * 64
+    try:
+        ReadinProjection.replay([*events[:43], invalid_residual])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("residual readback with invalid observation digest was accepted")
+
+    readback_view = projection.residual_readback_view("b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b1")
+    if readback_view["residual_state"] != "NOT_COMPUTED":
+        raise AssertionError("readback promoted an ineligible baseline to a residual")
+    if readback_view["validity_update_state"] != "NOT_APPLIED":
+        raise AssertionError("readback changed validity without an eligible residual")
+    if readback_view["readback"]["execution_receipt"]["network_access"]:
+        raise AssertionError("residual readback acquired network access")
+
     workbench = build_workbench_snapshot(projection, "11111111-1111-4111-8111-111111111111")
     if workbench["authority"]["state"] != "NO_AUTHORITY":
         raise AssertionError("workbench projection acquired action authority")
@@ -263,6 +319,14 @@ def main() -> None:
         raise AssertionError("workbench promoted observation planning to acquisition")
     if collection["expected_information_gain_state"] != "NOT_COMPUTED":
         raise AssertionError("workbench promoted ordinal ranking to information gain")
+    readback = workbench["selected_asset"]["readback"]["latest"]
+    if readback["residual_state"] != "NOT_COMPUTED":
+        raise AssertionError("workbench promoted readback to a computed residual")
+    if readback["learning_state"] != "NOT_STARTED":
+        raise AssertionError("workbench promoted readback abstention to learning")
+    forecast_design = workbench["selected_asset"]["forecasting"]["latest_evaluation_design"]
+    if forecast_design["prediction_state"] != "NOT_PRODUCED":
+        raise AssertionError("workbench promoted evaluation design to prediction")
 
     try:
         build_workbench_snapshot(projection, "unknown-asset")
@@ -278,8 +342,8 @@ def main() -> None:
         raise AssertionError("workbench accepted a non-loopback host")
 
     print(
-        f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=7 "
-        f"negative_semantic_vectors=15 tracked_assets={len(projection.assets)} "
+        f"PASS schemas=1 positive_events={len(events)} negative_contract_vectors=11 "
+        f"negative_semantic_vectors=17 tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
         f"resolution_candidates={len(projection.resolution_candidates)} "
         f"cartographic_surfaces={len(projection.cartographic_surfaces)} "
@@ -290,6 +354,8 @@ def main() -> None:
         f"scenarios={len(projection.scenarios)} scenario_runs={len(projection.scenario_runs)} "
         f"discrimination_plans={len(projection.discrimination_plans)} "
         f"discrimination_runs={len(projection.discrimination_runs)} "
+        f"forecast_evaluation_designs={len(projection.forecast_evaluation_designs)} "
+        f"residual_readbacks={len(projection.residual_readbacks)} "
         "workbench_contracts=1 negative_workbench_vectors=2"
     )
 

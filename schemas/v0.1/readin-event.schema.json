@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.readin.dev/v0.1/readin-event.schema.json",
   "title": "READIN Event v0.1",
-  "description": "Closed event envelope for the READIN Phase 0 through Phase 7 local ledger.",
+  "description": "Closed event envelope for the READIN Phase 0 through Phase 8B local ledger.",
   "type": "object",
   "required": [
     "schema_version",
@@ -38,7 +38,9 @@
         "scenario.created",
         "scenario.run_completed",
         "collection.discrimination_plan_created",
-        "collection.discrimination_run_completed"
+        "collection.discrimination_run_completed",
+        "forecast.evaluation_design_created",
+        "residual.readback_completed"
       ]
     },
     "occurred_at": { "$ref": "#/$defs/timestamp" },
@@ -277,6 +279,28 @@
       "then": {
         "properties": {
           "payload": { "$ref": "#/$defs/discriminationRunCompletedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "forecast.evaluation_design_created" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/forecastEvaluationDesignCreatedPayload" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "event_type": { "const": "residual.readback_completed" } },
+        "required": ["event_type"]
+      },
+      "then": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/residualReadbackCompletedPayload" }
         }
       }
     }
@@ -2581,6 +2605,234 @@
       "required": ["discrimination_run"],
       "properties": {
         "discrimination_run": { "$ref": "#/$defs/discriminationRun" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationTarget": {
+      "type": "object",
+      "required": [
+        "observation_type",
+        "structured_field_path",
+        "value_kind",
+        "unit",
+        "target_semantics"
+      ],
+      "properties": {
+        "observation_type": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "structured_field_path": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "value_kind": { "const": "NUMBER" },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "target_semantics": { "const": "USER_DECLARED_NOT_VALIDATED" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationMetric": {
+      "type": "object",
+      "required": ["name", "residual_definition", "direction", "metric_state"],
+      "properties": {
+        "name": { "const": "ABSOLUTE_ERROR" },
+        "residual_definition": { "const": "OBSERVED_MINUS_PREDICTED" },
+        "direction": { "const": "LOWER_IS_BETTER" },
+        "metric_state": { "const": "PREDECLARED_NOT_VALIDATED" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationTiming": {
+      "type": "object",
+      "required": [
+        "training_cutoff",
+        "forecast_origin",
+        "horizon_end",
+        "leakage_basis",
+        "post_cutoff_input_policy",
+        "readback_observation_policy"
+      ],
+      "properties": {
+        "training_cutoff": { "$ref": "#/$defs/timestamp" },
+        "forecast_origin": { "$ref": "#/$defs/timestamp" },
+        "horizon_end": { "$ref": "#/$defs/timestamp" },
+        "leakage_basis": { "const": "LEDGER_RECORDED_AT" },
+        "post_cutoff_input_policy": { "const": "EXCLUDE" },
+        "readback_observation_policy": { "const": "STRICTLY_AFTER_HORIZON" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationDesign": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "scenario_id",
+        "name",
+        "initial_state_version",
+        "target",
+        "metric",
+        "timing",
+        "preregistration_state",
+        "fitter_selection_state",
+        "forecast_execution_state",
+        "prediction_state",
+        "calibration_state",
+        "empirical_validity_state",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "scenario_id": { "$ref": "#/$defs/uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "initial_state_version": { "$ref": "#/$defs/uuid" },
+        "target": { "$ref": "#/$defs/forecastEvaluationTarget" },
+        "metric": { "$ref": "#/$defs/forecastEvaluationMetric" },
+        "timing": { "$ref": "#/$defs/forecastEvaluationTiming" },
+        "preregistration_state": { "const": "RECORDED_BEFORE_FORECAST_ORIGIN" },
+        "fitter_selection_state": { "const": "NOT_SELECTED" },
+        "forecast_execution_state": { "const": "NOT_STARTED" },
+        "prediction_state": { "const": "NOT_PRODUCED" },
+        "calibration_state": { "const": "NOT_ESTABLISHED" },
+        "empirical_validity_state": { "const": "NOT_ESTABLISHED" },
+        "created_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "forecastEvaluationDesignCreatedPayload": {
+      "type": "object",
+      "required": ["forecast_evaluation_design"],
+      "properties": {
+        "forecast_evaluation_design": { "$ref": "#/$defs/forecastEvaluationDesign" }
+      },
+      "additionalProperties": false
+    },
+    "residualReadbackExecutionReceipt": {
+      "type": "object",
+      "required": [
+        "id",
+        "readback_id",
+        "asset_entity_id",
+        "asset_state_version",
+        "scenario_run_id",
+        "forecast_evaluation_design_id",
+        "forecast_evaluation_design_sha256",
+        "scenario_run_sha256",
+        "scenario_sha256",
+        "observation_ids",
+        "source_artifact_ids",
+        "observer_frame_ids",
+        "observation_snapshot_sha256",
+        "algorithm_id",
+        "implementation_sha256",
+        "outcome_sha256",
+        "runtime",
+        "network_access",
+        "executed_at",
+        "authority_state"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "readback_id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "asset_state_version": { "$ref": "#/$defs/uuid" },
+        "scenario_run_id": { "$ref": "#/$defs/uuid" },
+        "forecast_evaluation_design_id": { "$ref": "#/$defs/uuid" },
+        "forecast_evaluation_design_sha256": { "$ref": "#/$defs/sha256" },
+        "scenario_run_sha256": { "$ref": "#/$defs/sha256" },
+        "scenario_sha256": { "$ref": "#/$defs/sha256" },
+        "observation_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "source_artifact_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "observer_frame_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "observation_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "algorithm_id": {
+          "const": "readin.reference.residual.forecast-eligibility-gate.v0.1"
+        },
+        "implementation_sha256": { "$ref": "#/$defs/sha256" },
+        "outcome_sha256": { "$ref": "#/$defs/sha256" },
+        "runtime": { "const": "LOCAL_DETERMINISTIC_REFERENCE" },
+        "network_access": { "const": false },
+        "executed_at": { "$ref": "#/$defs/timestamp" },
+        "authority_state": { "const": "NO_AUTHORITY" }
+      },
+      "additionalProperties": false
+    },
+    "residualReadback": {
+      "type": "object",
+      "required": [
+        "id",
+        "asset_entity_id",
+        "scenario_run_id",
+        "observation_ids",
+        "temporal_order_state",
+        "baseline_eligibility_state",
+        "reference_prediction_state",
+        "residual_state",
+        "residual_value",
+        "validity_update_state",
+        "weighting_update_state",
+        "future_admissibility_update_state",
+        "learning_state",
+        "interpretation",
+        "execution_receipt",
+        "recorded_at"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "asset_entity_id": { "$ref": "#/$defs/uuid" },
+        "scenario_run_id": { "$ref": "#/$defs/uuid" },
+        "observation_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/uuid" },
+          "uniqueItems": true
+        },
+        "temporal_order_state": {
+          "const": "LATER_THAN_SCENARIO_HORIZON_CONFIRMED"
+        },
+        "baseline_eligibility_state": {
+          "const": "INELIGIBLE_NO_FORECAST_BASELINE"
+        },
+        "reference_prediction_state": { "const": "NOT_REQUESTED" },
+        "residual_state": { "const": "NOT_COMPUTED" },
+        "residual_value": { "type": "null" },
+        "validity_update_state": { "const": "NOT_APPLIED" },
+        "weighting_update_state": { "const": "NOT_APPLIED" },
+        "future_admissibility_update_state": { "const": "NOT_APPLIED" },
+        "learning_state": { "const": "NOT_STARTED" },
+        "interpretation": {
+          "const": "READBACK_RETAINED_WITHOUT_FORECAST_RESIDUAL"
+        },
+        "execution_receipt": { "$ref": "#/$defs/residualReadbackExecutionReceipt" },
+        "recorded_at": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "residualReadbackCompletedPayload": {
+      "type": "object",
+      "required": ["residual_readback"],
+      "properties": {
+        "residual_readback": { "$ref": "#/$defs/residualReadback" }
       },
       "additionalProperties": false
     }

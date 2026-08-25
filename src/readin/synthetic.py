@@ -32,7 +32,9 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
+from readin.forecasting import create_forecast_evaluation_design
 from readin.projection import ReadinProjection
+from readin.residuals import execute_residual_readback
 from readin.scenarios import create_bounded_scenario, execute_scenario
 
 
@@ -738,6 +740,85 @@ def phase7_events() -> list[dict[str, Any]]:
             receipt_id="94949494-9494-4494-8494-949494949492",
             event_id="94949494-9494-4494-8494-949494949493",
             occurred_at="2026-08-21T12:00:37Z",
+        )
+    )
+    return events
+
+
+def phase8_events() -> list[dict[str, Any]]:
+    """Return a predeclared target and later readback without a forecast baseline."""
+
+    events = phase7_events()
+    asset_id = "11111111-1111-4111-8111-111111111111"
+    frame_id = "91919191-9191-4191-8191-919191919191"
+    artifact_id = "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1"
+    observation_id = "a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a2"
+    payload = {
+        "reported_program": "Synthetic compute research initiative",
+        "readback_status": "follow_up_observed",
+        "activity_score": 1.0,
+        "fixture_boundary": "manual_synthetic_only",
+    }
+    artifact_bytes = json.dumps(
+        payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    source_uri = "urn:readin:synthetic:later-readback-001"
+
+    projection = ReadinProjection.replay(events)
+    events.append(
+        create_forecast_evaluation_design(
+            projection,
+            "85858585-8585-4585-8585-858585858585",
+            "Synthetic program-activity forecast evaluation",
+            "independent_record.program_activity_follow_up",
+            ["activity_score"],
+            "synthetic_activity_index",
+            training_cutoff="2026-08-21T12:00:37Z",
+            design_id="a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a0",
+            event_id="a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a2",
+            occurred_at="2026-08-21T12:00:38Z",
+        )
+    )
+
+    events.append(
+        create_evidence_manifested(
+            hashlib.sha256(artifact_bytes).hexdigest(),
+            "application/json",
+            len(artifact_bytes),
+            "Bundled synthetic later readback",
+            source_uri=source_uri,
+            license_name="Apache-2.0",
+            artifact_id=artifact_id,
+            event_id="a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a2",
+            occurred_at="2026-09-22T12:00:00Z",
+        )
+    )
+    events.append(
+        create_observation_admitted(
+            [asset_id],
+            frame_id,
+            artifact_id,
+            "independent_record.program_activity_follow_up",
+            payload,
+            "2026-09-22T11:59:00Z",
+            source_uri=source_uri,
+            uncertainty={"disposition": "NOT_EVALUATED"},
+            observation_id=observation_id,
+            event_id="a2a2a2a2-a2a2-42a2-82a2-a2a2a2a2a2a3",
+            occurred_at="2026-09-22T12:00:01Z",
+        )
+    )
+
+    projection = ReadinProjection.replay(events)
+    events.append(
+        execute_residual_readback(
+            projection,
+            "89898989-8989-4989-8989-898989898981",
+            [observation_id],
+            readback_id="b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b1",
+            receipt_id="b2b2b2b2-b2b2-42b2-82b2-b2b2b2b2b2b2",
+            event_id="b3b3b3b3-b3b3-43b3-83b3-b3b3b3b3b3b3",
+            occurred_at="2026-09-22T12:00:02Z",
         )
     )
     return events

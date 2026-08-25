@@ -509,6 +509,7 @@ p {
 .record-primary {
   min-width: 0;
   font-weight: 620;
+  overflow-wrap: anywhere;
 }
 
 .record-primary small,
@@ -526,6 +527,7 @@ p {
   min-width: 0;
   color: #c2c9ce;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .state-tag {

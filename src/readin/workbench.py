@@ -1,4 +1,4 @@
-"""Read-only Phase 6 workbench with bounded Phase 7 observation planning."""
+"""Read-only workbench through bounded Phase 8B forecast design and residual eligibility."""
 
 from __future__ import annotations
 
@@ -253,6 +253,64 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             ],
         }
 
+    forecast_design = None
+    if view["forecast_evaluation_designs"]:
+        item = view["forecast_evaluation_designs"][-1]
+        design = item["design"]
+        forecast_design = {
+            "id": design["id"],
+            "name": design["name"],
+            "scenario_name": item["scenario"]["name"],
+            "observation_type": design["target"]["observation_type"],
+            "structured_field_path": deepcopy(design["target"]["structured_field_path"]),
+            "unit": design["target"]["unit"],
+            "target_semantics": design["target"]["target_semantics"],
+            "metric_name": design["metric"]["name"],
+            "metric_state": design["metric"]["metric_state"],
+            "residual_definition": design["metric"]["residual_definition"],
+            "training_cutoff": design["timing"]["training_cutoff"],
+            "forecast_origin": design["timing"]["forecast_origin"],
+            "horizon_end": design["timing"]["horizon_end"],
+            "leakage_basis": design["timing"]["leakage_basis"],
+            "post_cutoff_input_policy": design["timing"]["post_cutoff_input_policy"],
+            "preregistration_state": design["preregistration_state"],
+            "fitter_selection_state": design["fitter_selection_state"],
+            "forecast_capable_fitter_state": item["forecast_capable_fitter_state"],
+            "forecast_execution_state": item["forecast_execution_state"],
+            "prediction_state": item["prediction_state"],
+            "calibration_state": item["calibration_state"],
+        }
+
+    residual_readback = None
+    if view["residual_readbacks"]:
+        item = view["residual_readbacks"][-1]
+        readback = item["readback"]
+        residual_readback = {
+            "id": readback["id"],
+            "scenario_run_id": readback["scenario_run_id"],
+            "scenario_name": item["scenario"]["name"],
+            "scenario_start_time": item["scenario"]["start_time"],
+            "scenario_horizon_days": item["scenario"]["horizon_days"],
+            "observation_count": len(item["observations"]),
+            "latest_observed_at": max(
+                observation["observed_at"] for observation in item["observations"]
+            ),
+            "observation_types": sorted(
+                {observation["observation_type"] for observation in item["observations"]}
+            ),
+            "temporal_order_state": readback["temporal_order_state"],
+            "baseline_eligibility_state": readback["baseline_eligibility_state"],
+            "reference_prediction_state": readback["reference_prediction_state"],
+            "forecast_baseline_state": item["forecast_baseline_state"],
+            "residual_state": item["residual_state"],
+            "validity_update_state": item["validity_update_state"],
+            "weighting_update_state": item["weighting_update_state"],
+            "future_admissibility_update_state": item["future_admissibility_update_state"],
+            "learning_state": item["learning_state"],
+            "interpretation": readback["interpretation"],
+            "network_access": readback["execution_receipt"]["network_access"],
+        }
+
     timeline = projection.timeline_view(entity_id)["entries"]
     return {
         "identity": {
@@ -279,6 +337,8 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "hypotheses": len(hypotheses),
             "scenarios": len(scenarios),
             "discrimination_plans": len(view["discrimination_plans"]),
+            "forecast_evaluation_designs": len(view["forecast_evaluation_designs"]),
+            "residual_readbacks": len(view["residual_readbacks"]),
             "timeline_events": len(timeline),
         },
         "observer_frames": frames,
@@ -335,6 +395,8 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
         "belief": {"latest_revision": latest_revision, "hypotheses": hypotheses},
         "scenarios": scenarios,
         "collection": {"latest_discrimination": discrimination},
+        "forecasting": {"latest_evaluation_design": forecast_design},
+        "readback": {"latest": residual_readback},
         "timeline": [
             {
                 "event_id": item["event_id"],
@@ -382,6 +444,9 @@ def build_workbench_snapshot(
             "collection_state": "NOT_STARTED",
             "acquisition_state": "NOT_ATTEMPTED",
             "source_independence_state": "NOT_ESTABLISHED",
+            "residual_state": "NOT_COMPUTED",
+            "validity_update_state": "NOT_APPLIED",
+            "learning_state": "NOT_STARTED",
         },
         "catalog": catalog,
         "selected_asset": (

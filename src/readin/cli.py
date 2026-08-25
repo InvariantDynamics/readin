@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 through Phase 7 runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 8B runtime."""
 
 from __future__ import annotations
 
@@ -38,7 +38,9 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
+from readin.forecasting import ForecastDesignError, create_forecast_evaluation_design
 from readin.projection import ProjectionError
+from readin.residuals import ResidualRuntimeError, execute_residual_readback
 from readin.scenarios import (
     ScenarioRuntimeError,
     create_bounded_scenario,
@@ -454,6 +456,32 @@ def _build_parser() -> argparse.ArgumentParser:
     run_discrimination_parser.add_argument("--plan", required=True)
     run_discrimination_parser.add_argument("--run-id")
 
+    forecast_design_parser = subparsers.add_parser(
+        "create-forecast-evaluation-design",
+        help=(
+            "Predeclare a numeric forecast target and leakage boundary without executing a forecast"
+        ),
+    )
+    _add_ledger_argument(forecast_design_parser)
+    forecast_design_parser.add_argument("--scenario", required=True)
+    forecast_design_parser.add_argument("--name", required=True)
+    forecast_design_parser.add_argument("--observation-type", required=True)
+    forecast_design_parser.add_argument("--field", required=True, action="append")
+    forecast_design_parser.add_argument("--unit", required=True)
+    forecast_design_parser.add_argument("--training-cutoff", required=True)
+    forecast_design_parser.add_argument("--design-id")
+    forecast_design_parser.add_argument("--occurred-at")
+
+    residual_parser = subparsers.add_parser(
+        "run-residual-readback",
+        help="Bind later observations and abstain when no forecast baseline exists",
+    )
+    _add_ledger_argument(residual_parser)
+    residual_parser.add_argument("--scenario-run", required=True)
+    residual_parser.add_argument("--observation", required=True, action="append")
+    residual_parser.add_argument("--readback-id")
+    residual_parser.add_argument("--occurred-at")
+
     show_parser = subparsers.add_parser("show-asset", help="Replay and inspect one tracked asset")
     _add_ledger_argument(show_parser)
     show_parser.add_argument("--asset", required=True)
@@ -550,6 +578,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_ledger_argument(discrimination_run_view_parser)
     discrimination_run_view_parser.add_argument("--run", required=True)
+
+    forecast_design_view_parser = subparsers.add_parser(
+        "show-forecast-evaluation-design",
+        help="Inspect one preregistered target with forecast execution fixed off",
+    )
+    _add_ledger_argument(forecast_design_view_parser)
+    forecast_design_view_parser.add_argument("--design", required=True)
+
+    residual_view_parser = subparsers.add_parser(
+        "show-residual-readback",
+        help="Inspect one residual eligibility readback and its abstention receipt",
+    )
+    _add_ledger_argument(residual_view_parser)
+    residual_view_parser.add_argument("--readback", required=True)
 
     list_parser = subparsers.add_parser("list-assets", help="Replay and list the tracked catalog")
     _add_ledger_argument(list_parser)
@@ -894,6 +936,36 @@ def _run(args: argparse.Namespace) -> Any:
         run_id = event["payload"]["discrimination_run"]["id"]
         return ledger.projection().discrimination_run_view(run_id)
 
+    if args.command == "create-forecast-evaluation-design":
+        projection = ledger.projection()
+        event = create_forecast_evaluation_design(
+            projection,
+            args.scenario,
+            args.name,
+            args.observation_type,
+            args.field,
+            args.unit,
+            training_cutoff=args.training_cutoff,
+            design_id=args.design_id,
+            occurred_at=args.occurred_at,
+        )
+        ledger.append(event)
+        design_id = event["payload"]["forecast_evaluation_design"]["id"]
+        return ledger.projection().forecast_evaluation_design_view(design_id)
+
+    if args.command == "run-residual-readback":
+        projection = ledger.projection()
+        event = execute_residual_readback(
+            projection,
+            args.scenario_run,
+            args.observation,
+            readback_id=args.readback_id,
+            occurred_at=args.occurred_at,
+        )
+        ledger.append(event)
+        readback_id = event["payload"]["residual_readback"]["id"]
+        return ledger.projection().residual_readback_view(readback_id)
+
     projection = ledger.projection()
     if args.command == "show-asset":
         return projection.asset_view_at(
@@ -933,6 +1005,10 @@ def _run(args: argparse.Namespace) -> Any:
         return projection.discrimination_plan_view(args.plan)
     if args.command == "show-discrimination-run":
         return projection.discrimination_run_view(args.run)
+    if args.command == "show-forecast-evaluation-design":
+        return projection.forecast_evaluation_design_view(args.design)
+    if args.command == "show-residual-readback":
+        return projection.residual_readback_view(args.readback)
     if args.command == "list-assets":
         return projection.catalog_view()
     if args.command == "show-workbench":
@@ -951,9 +1027,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         DiscriminationRuntimeError,
         BeliefRuntimeError,
         FitterRuntimeError,
+        ForecastDesignError,
         KeyError,
         LedgerError,
         ProjectionError,
+        ResidualRuntimeError,
         ScenarioRuntimeError,
         WorkbenchError,
         ValueError,
