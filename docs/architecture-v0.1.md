@@ -20,14 +20,14 @@ The current implementation opens the entity, tracking, frame, evidence-manifest,
 dependency, claim, evidence-link, relation, historical reconstruction, and reversible candidate
 resolution layers, plus bounded cartographic, multi-fitter, belief, scenario,
 discriminating-observation, forecast-evaluation design, frozen-baseline, readback-selection, and
-residual-readback eligibility layers.
+descriptive-reference-residual and residual-readback eligibility layers.
 These layers remain separate:
 an observation is never silently promoted into a claim or belief, linked evidence
 never resolves a claim by itself, a selected surface never becomes a completeness claim, a fitter
 result never becomes evidence or model authority, a categorical belief revision never becomes a
 truth probability, a scenario branch never becomes a forecast, a ranked observation candidate
-never becomes collection authority, and a selected readback never becomes a residual or validity
-update without a separately opened scoring contract.
+never becomes collection authority, and descriptive residual arithmetic never becomes forecast
+validation or a validity update without a separately opened evidence and update contract.
 
 ## Ownership boundary
 
@@ -39,7 +39,7 @@ update without a separately opened scoring contract.
 
 ## Current event model
 
-The ledger supports twenty-seven events:
+The ledger supports twenty-eight events:
 
 - `entity.created`
 - `asset.tracking_started`
@@ -67,6 +67,7 @@ The ledger supports twenty-seven events:
 - `forecast.baseline_completed`
 - `forecast.readback_selection_plan_created`
 - `forecast.readback_selection_completed`
+- `forecast.residual_computed`
 - `residual.readback_completed`
 
 Every event is append-only, schema-validated, timestamped, uniquely identified, and marked
@@ -122,7 +123,9 @@ scenario.created --> forecast.evaluation_design_created
                   --> forecast.readback_selection_plan_created
 later observation.admitted + admission cutoff
                   --> forecast.readback_selection_completed
-                  --> exactly one selected or explicit abstention; no residual
+                  --> exactly one selected or explicit abstention
+                  --> forecast.residual_computed
+                  --> descriptive arithmetic only; no validity or learning update
 ```
 
 Candidate resolution is a sidecar to entity identity, not an entity mutation. A candidate records
@@ -284,6 +287,22 @@ observations do not yet carry a separately validated unit field, unit equivalenc
 `USER_DECLARED_NOT_VERIFIED`. Selection does not compute a residual or enable scoring, calibration,
 validity, weighting, admissibility, learning, collection, or action authority.
 
+Phase 8E opens a separate, narrow arithmetic contract only after a Phase 8D run records
+`UNIQUE_MATCH_SELECTED`. The deterministic runtime binds the selection run and plan, frozen
+baseline, evaluation design, scenario, selected observation, observer frame, and evidence manifest.
+It computes signed residual as observed minus predicted and absolute error as the absolute value of
+that residual. The receipt binds every input digest, the exact reference implementation, and the
+outcome digest. Replay recomputes the full snapshot and arithmetic and rejects input drift,
+tampering, abstained selection, or a second residual for the same selection run.
+
+The result is fixed to `sample_count: 1`, `COMPUTED_DESCRIPTIVE_REFERENCE_ONLY`, and
+`NOT_ESTIMATED_SINGLE_READBACK`. Because observations do not carry an independently validated unit
+binding, unit equivalence remains `USER_DECLARED_NOT_VERIFIED`. Calibration and empirical validity
+remain `NOT_ESTABLISHED`; validity, weighting, and future-admissibility updates remain
+`NOT_APPLIED`; learning remains `NOT_STARTED`. Network access is false and authority remains
+`NO_AUTHORITY`. The number is a descriptive error for an uncalibrated reference constant, not a
+forecast-skill estimate or model-validity claim.
+
 Later readback observations must match the predeclared observation type and contain a numeric value
 at the declared structured-field path. The receipt binds the complete evaluation design. These
 checks establish target compatibility and temporal order only; they do not establish that any
@@ -297,17 +316,18 @@ residual to `NOT_COMPUTED`. Fitter-validity, weighting, and future-admissibility
 tampered receipts, non-later observations, cross-asset observations, missing inputs, or a second
 readback for the same scenario run.
 
-The Phase 8D baseline-selection branch and the Phase 8A no-baseline readback branch are deliberately
-separate. If a frozen baseline exists, the Phase 8A readback command rejects execution. After Phase
-8D has selected a unique compatible observation, it still rejects execution because a residual
-scoring contract has not been opened. This prevents READIN from incorrectly recording
+The Phase 8E baseline-selection-residual branch and the Phase 8A no-baseline readback branch are
+deliberately separate. If a frozen baseline exists, the Phase 8A readback command rejects execution.
+Phase 8E arithmetic is reached only through the preregistered Phase 8D selector and never through the
+no-baseline path. This prevents READIN from incorrectly recording
 `INELIGIBLE_NO_FORECAST_BASELINE` or manufacturing a residual from an unsupported update path.
 
 These slices do not satisfy the full Phase 8 exit condition. No trained or calibrated
-forecast-capable fitter, computed residual value, validation corpus, validity update, weighting
-update, admissibility update, or empirical learning exists. The workbench Readback tab presents the
-frozen baseline, preregistered selection or abstention, or the no-baseline state, with no write control, network access,
-collection, or action authority.
+forecast-capable fitter, validation corpus, uncertainty estimate, validity update, weighting update,
+admissibility update, or empirical learning exists. The only computed residual is one descriptive
+comparison against an uncalibrated user-declared constant. The workbench Readback tab presents the
+frozen baseline, preregistered selection or abstention, descriptive arithmetic when eligible, or the
+no-baseline state, with no write control, network access, collection, or action authority.
 
 Claims are created with `epistemic_status: unresolved`. An evidence link records role or polarity,
 dependency group, warrant, appraisal, and strength as separate axes. Strength is `UNASSESSED` until
@@ -367,9 +387,10 @@ artifact storage and live acquisition are later gated work.
    *(implemented)*
 9. **Phase 8 residual loop** — bind later observations to prior forecasts, compute residuals, and
    update fitter validity or weighting only when supported. *(Phase 8A readback eligibility and
-   Phase 8B evaluation-design prerequisites, Phase 8C frozen constant baseline, and Phase 8D
-   preregistered exactly-one readback selection implemented; residual scoring, trained or calibrated
-   forecast models, and updates not implemented)*
+   Phase 8B evaluation-design prerequisites, Phase 8C frozen constant baseline, Phase 8D
+   preregistered exactly-one readback selection, and Phase 8E one-sample descriptive reference
+   residual implemented; trained or calibrated forecast models, validation-corpus scoring,
+   uncertainty estimation, and updates not implemented)*
 
 Each slice requires its own contract, positive and negative fixtures, validation path, claim ceiling,
 and stop conditions.

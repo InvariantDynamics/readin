@@ -350,6 +350,7 @@ function renderCollection(asset) {
 function renderReadback(asset) {
   const item = asset.readback.latest;
   const selection = asset.readback.latest_selection;
+  const residual = asset.readback.latest_forecast_residual;
   const design = asset.forecasting.latest_evaluation_design;
   const baseline = asset.forecasting.latest_baseline;
   if (!item && !selection && !design) return emptyState();
@@ -368,7 +369,7 @@ function renderReadback(asset) {
           ${stateTag(design.fitter_selection_state)}
           ${stateTag(design.prediction_state)}
         </div>
-        <p>${baseline ? "A user-declared constant baseline was frozen before forecast origin. It used no training observations and remains uncalibrated and empirically unvalidated; residual scoring is still disabled." : `${escapeHtml(design.metric_name)} was recorded before the forecast origin using a ledger-recorded training cutoff. Post-cutoff input is excluded. The target and metric remain user-declared and unvalidated; no forecast-capable fitter is registered.`}</p>
+        <p>${baseline ? residual ? "A user-declared constant baseline was frozen before forecast origin. One descriptive residual has been computed against the uniquely selected readback, but calibration and empirical validity remain unestablished." : "A user-declared constant baseline was frozen before forecast origin. It used no training observations and remains uncalibrated and empirically unvalidated; residual scoring is still disabled." : `${escapeHtml(design.metric_name)} was recorded before the forecast origin using a ledger-recorded training cutoff. Post-cutoff input is excluded. The target and metric remain user-declared and unvalidated; no forecast-capable fitter is registered.`}</p>
       </div>
       <ul class="record-list"><li class="record-row">
         <div class="record-primary">${escapeHtml(titleCase(design.observation_type))}<small>${escapeHtml(design.target_semantics)}</small></div>
@@ -410,17 +411,32 @@ function renderReadback(asset) {
       <div class="record-secondary">No ranking or aggregation performed<small>${escapeHtml(selection.ranking_state)} · ${escapeHtml(selection.aggregation_state)}</small></div>
       ${stateTag(selection.selection_state)}
     </li></ul>`;
+    const residualResult = residual
+      ? `<div class="aperture-grid">
+          <div class="aperture-cell"><strong>${escapeHtml(residual.prediction_value)}</strong><span>Predicted</span></div>
+          <div class="aperture-cell"><strong>${escapeHtml(residual.observed_value)}</strong><span>Observed</span></div>
+          <div class="aperture-cell"><strong>${escapeHtml(residual.signed_residual)}</strong><span>Observed − predicted</span></div>
+          <div class="aperture-cell"><strong>${escapeHtml(residual.absolute_error)}</strong><span>Absolute error</span></div>
+        </div>
+        <ul class="record-list"><li class="record-row">
+          <div class="record-primary">${escapeHtml(residual.metric_name)}<small>${escapeHtml(residual.metric_state)}</small></div>
+          <div class="record-secondary">${escapeHtml(residual.unit)}<small>Unit equivalence ${escapeHtml(residual.unit_match_state)}</small></div>
+          ${stateTag(residual.residual_state)}
+        </li></ul>`
+      : "";
+    const boundary = residual ?? selection;
     const updates = `<ul class="record-list">
-      <li class="record-row"><div class="record-primary">Residual</div><div class="record-secondary">Selection is not scoring</div>${stateTag(selection.residual_state)}</li>
-      <li class="record-row"><div class="record-primary">Calibration</div><div class="record-secondary">Forecast skill remains unestablished</div>${stateTag(selection.calibration_state)}</li>
-      <li class="record-row"><div class="record-primary">Fitter validity</div><div class="record-secondary">No validity claim is justified</div>${stateTag(selection.validity_update_state)}</li>
-      <li class="record-row"><div class="record-primary">Learning</div><div class="record-secondary">No model or weight update</div>${stateTag(selection.learning_state)}</li>
+      <li class="record-row"><div class="record-primary">Residual</div><div class="record-secondary">${residual ? "Descriptive arithmetic only" : "Selection is not scoring"}</div>${stateTag(boundary.residual_state)}</li>
+      <li class="record-row"><div class="record-primary">Calibration</div><div class="record-secondary">Forecast skill remains unestablished</div>${stateTag(boundary.calibration_state)}</li>
+      <li class="record-row"><div class="record-primary">Fitter validity</div><div class="record-secondary">No validity claim is justified</div>${stateTag(boundary.validity_update_state)}</li>
+      <li class="record-row"><div class="record-primary">Learning</div><div class="record-secondary">No model or weight update</div>${stateTag(boundary.learning_state)}</li>
     </ul>`;
     return `<div class="overview-grid">
       ${sectionCard("Forecast evaluation design", design?.name ?? "none", designBody, true)}
       ${sectionCard("Predeclared readback aperture", selection.name, aperture, true)}
       ${sectionCard("Exactly-one selection", selection.selection_state, selectionResult, true)}
-      ${sectionCard("Scoring boundary", selection.residual_scoring_state, updates, true)}
+      ${residual ? sectionCard("Descriptive reference residual", residual.residual_scoring_state, residualResult, true) : ""}
+      ${sectionCard("Validity and learning boundary", boundary.learning_state, updates, true)}
     </div>`;
   }
   if (!item) {

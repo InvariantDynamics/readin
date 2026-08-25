@@ -101,7 +101,7 @@ wheels = [
 
 [[package]]
 name = "readin-intelligence"
-version = "0.1.0.dev11"
+version = "0.1.0.dev12"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },

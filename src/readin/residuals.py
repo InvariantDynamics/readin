@@ -130,6 +130,11 @@ def build_residual_snapshot(
                 "forecast readback selection abstained: "
                 f"{selection_run['selection_state']}; residual scoring is not enabled"
             )
+        if selection_run_id in projection._selection_run_forecast_residual:
+            raise ResidualRuntimeError(
+                "Phase 8E descriptive forecast residual already exists; "
+                "the Phase 8A no-baseline readback path is not applicable"
+            )
         raise ResidualRuntimeError(
             "Phase 8D selected a unique readback observation, but residual scoring is not enabled"
         )

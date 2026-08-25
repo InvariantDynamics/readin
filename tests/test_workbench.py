@@ -16,6 +16,7 @@ from readin.synthetic import (
     phase8_events,
     phase8c_events,
     phase8d_events,
+    phase8e_events,
 )
 from readin.workbench import (
     WorkbenchError,
@@ -175,6 +176,33 @@ def test_workbench_exposes_phase8d_selection_without_residual_or_learning() -> N
     assert selection["learning_state"] == "NOT_STARTED"
     assert selection["network_access"] is False
     assert asset["readback"]["latest"] is None
+
+
+def test_workbench_exposes_phase8e_descriptive_residual_without_validity() -> None:
+    snapshot = build_workbench_snapshot(ReadinProjection.replay(phase8e_events()), ASSET_ID)
+    asset = snapshot["selected_asset"]
+    residual = asset["readback"]["latest_forecast_residual"]
+
+    assert snapshot["generated_from"]["event_count"] == 47
+    assert snapshot["epistemic_limits"]["residual_state"] == ("COMPUTED_DESCRIPTIVE_REFERENCE_ONLY")
+    assert snapshot["epistemic_limits"]["empirical_validity_state"] == ("NOT_ESTABLISHED")
+    assert snapshot["epistemic_limits"]["validity_update_state"] == "NOT_APPLIED"
+    assert snapshot["epistemic_limits"]["learning_state"] == "NOT_STARTED"
+    assert asset["counts"]["forecast_residuals"] == 1
+    assert residual["prediction_value"] == 0.75
+    assert residual["observed_value"] == 1.0
+    assert residual["signed_residual"] == 0.25
+    assert residual["absolute_error"] == 0.25
+    assert residual["unit_match_state"] == "USER_DECLARED_NOT_VERIFIED"
+    assert residual["residual_state"] == "COMPUTED_DESCRIPTIVE_REFERENCE_ONLY"
+    assert residual["uncertainty_state"] == "NOT_ESTIMATED_SINGLE_READBACK"
+    assert residual["calibration_state"] == "NOT_ESTABLISHED"
+    assert residual["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert residual["validity_update_state"] == "NOT_APPLIED"
+    assert residual["weighting_update_state"] == "NOT_APPLIED"
+    assert residual["future_admissibility_update_state"] == "NOT_APPLIED"
+    assert residual["learning_state"] == "NOT_STARTED"
+    assert residual["network_access"] is False
 
 
 def test_workbench_projection_supports_empty_catalog_and_rejects_unknown_asset() -> None:

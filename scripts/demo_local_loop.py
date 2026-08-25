@@ -1,4 +1,4 @@
-"""Run the closed synthetic Phase 8D readback-selection prerequisite loop."""
+"""Run the closed synthetic Phase 8E descriptive reference-residual loop."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ import json
 from tempfile import TemporaryDirectory
 
 from readin.store import EventLedger
-from readin.synthetic import phase8d_events
+from readin.synthetic import phase8e_events
 
 
 def main() -> None:
     with TemporaryDirectory(prefix="readin-demo-") as directory:
         ledger = EventLedger(f"{directory}/events.jsonl")
         ledger.initialize()
-        events = phase8d_events()
+        events = phase8e_events()
         for event in events:
             ledger.append(event)
         print(
@@ -38,6 +38,9 @@ def main() -> None:
                     ),
                     "readback_selection": ledger.projection().readback_selection_plan_view(
                         "d0d0d0d0-d0d0-40d0-80d0-d0d0d0d0d0d0"
+                    ),
+                    "forecast_residual": ledger.projection().forecast_residual_view(
+                        "e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e0"
                     ),
                 },
                 indent=2,

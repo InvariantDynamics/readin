@@ -28,7 +28,7 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 8D slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 8E slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -70,8 +70,11 @@ The Phase 0 through bounded Phase 8D slices are local-first and manual-input onl
   abstention;
 - mutually exclusive exclusion accounting with aggregation, ranking, and post-hoc selection
   prohibited;
-- residual scoring fixed at `NOT_ENABLED`, with validity, weighting, future-admissibility, and
-  learning updates fixed off;
+- readback selection residual scoring fixed at `NOT_ENABLED`, with validity, weighting,
+  future-admissibility, and learning updates fixed off;
+- one deterministic descriptive residual for a frozen constant and one uniquely selected readback;
+- signed residual and absolute error retained with unit equivalence unverified and single-readback
+  uncertainty not estimated;
 - later manual-observation binding to an earlier scenario horizon;
 - fail-closed forecast-baseline eligibility with digest-bound readback receipts;
 - residual, validity, weighting, future-admissibility, and learning updates fixed off when no
@@ -111,8 +114,9 @@ Phase 8C adds one frozen `USER_DECLARED_CONSTANT` benchmark after design creatio
 origin. It uses no training observations and records `PRODUCED_UNCALIBRATED_BASELINE`, while
 calibration and empirical validity remain `NOT_ESTABLISHED`. Residual scoring stays `NOT_ENABLED`;
 all validity, weighting, future-admissibility, and learning updates remain off. If this baseline is
-present, the Phase 8A no-baseline readback command fails closed until a separate residual-scoring
-contract exists. The benchmark is not an observation, evidence, calibrated model, or action signal.
+present, the Phase 8A no-baseline readback command fails closed; Phase 8E uses the separate
+selection-bound residual path. The benchmark is not an observation, evidence, calibrated model, or
+action signal.
 Phase 8D adds a separate preregistered readback-selection plan after the baseline and before forecast
 origin. It fixes eligible observer frames, an observation-time window strictly after the horizon,
 and a ledger-admission cutoff. After the cutoff, the deterministic selector returns
@@ -121,6 +125,14 @@ aggregates, or chooses among multiple candidates. A unique selection still leave
 `USER_DECLARED_NOT_VERIFIED`, residual `NOT_COMPUTED`, scoring `NOT_ENABLED`, and every validity,
 weighting, future-admissibility, and learning update off. It is a selection contract, not a scoring
 contract or authority grant.
+Phase 8E adds only the separately contracted descriptive arithmetic after a
+`UNIQUE_MATCH_SELECTED` result. It computes signed residual as observed minus predicted and its
+absolute error for the frozen user-declared constant. Unit equivalence remains
+`USER_DECLARED_NOT_VERIFIED`, uncertainty remains `NOT_ESTIMATED_SINGLE_READBACK`, and the result is
+`COMPUTED_DESCRIPTIVE_REFERENCE_ONLY`. Calibration and empirical validity remain
+`NOT_ESTABLISHED`; validity, weighting, future-admissibility, and learning updates remain off. This
+is not forecast validation, model comparison, a trained fitter, an operational signal, or an
+authority grant.
 
 ## Contract changes
 
