@@ -28,7 +28,7 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 8B slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 8D slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -59,7 +59,19 @@ The Phase 0 through bounded Phase 8B slices are local-first and manual-input onl
 - digest-bound discrimination receipts with collection and acquisition fixed off;
 - preregistered numeric forecast-evaluation targets and metrics;
 - ledger-recorded training cutoffs with post-cutoff input exclusion;
-- forecast fitter selection, execution, prediction, and calibration fixed off;
+- evaluation-design fitter selection remains `NOT_SELECTED`; a separate baseline event does not
+  register or select a fitter;
+- one user-declared constant reference baseline frozen before forecast origin;
+- no training observations used by the baseline and no learned or external model execution;
+- baseline calibration and empirical validity fixed at `NOT_ESTABLISHED`;
+- readback observer frames, observation-time window, and ledger-admission cutoff preregistered
+  before forecast origin;
+- deterministic exactly-one readback selection with explicit no-match and multiple-match
+  abstention;
+- mutually exclusive exclusion accounting with aggregation, ranking, and post-hoc selection
+  prohibited;
+- residual scoring fixed at `NOT_ENABLED`, with validity, weighting, future-admissibility, and
+  learning updates fixed off;
 - later manual-observation binding to an earlier scenario horizon;
 - fail-closed forecast-baseline eligibility with digest-bound readback receipts;
 - residual, validity, weighting, future-admissibility, and learning updates fixed off when no
@@ -69,8 +81,8 @@ The Phase 0 through bounded Phase 8B slices are local-first and manual-input onl
 - schema validation and fail-closed referential checks.
 
 No live adapters, credentials, network acquisition, entity merge, automated claim
-extraction, external model service, forecast, external database, service deployment, or autonomous action
-exists in this slice. Resolution assessments never mutate canonical entity identity. Claims,
+extraction, learned or external forecast model, external database, service deployment, or autonomous
+action exists in this slice. Resolution assessments never mutate canonical entity identity. Claims,
 relations, candidate dispositions, surfaces, and query plans are manually recorded epistemic
 objects, not machine truth determinations. A cartographic result never establishes source coverage
 or completeness, and execution cannot access the network. Reference fitter outputs are local
@@ -95,6 +107,20 @@ absolute-error metric, training cutoff, forecast origin, and post-cutoff exclusi
 before the scenario begins. It requires later readback observations to match that target, but keeps
 fitter selection `NOT_SELECTED`, execution `NOT_STARTED`, prediction `NOT_PRODUCED`, and calibration
 `NOT_ESTABLISHED`. It does not create a forecast-capable fitter or satisfy the Phase 8 exit condition.
+Phase 8C adds one frozen `USER_DECLARED_CONSTANT` benchmark after design creation and before forecast
+origin. It uses no training observations and records `PRODUCED_UNCALIBRATED_BASELINE`, while
+calibration and empirical validity remain `NOT_ESTABLISHED`. Residual scoring stays `NOT_ENABLED`;
+all validity, weighting, future-admissibility, and learning updates remain off. If this baseline is
+present, the Phase 8A no-baseline readback command fails closed until a separate residual-scoring
+contract exists. The benchmark is not an observation, evidence, calibrated model, or action signal.
+Phase 8D adds a separate preregistered readback-selection plan after the baseline and before forecast
+origin. It fixes eligible observer frames, an observation-time window strictly after the horizon,
+and a ledger-admission cutoff. After the cutoff, the deterministic selector returns
+`UNIQUE_MATCH_SELECTED`, `ABSTAINED_NO_MATCH`, or `ABSTAINED_MULTIPLE_MATCHES`. It never ranks,
+aggregates, or chooses among multiple candidates. A unique selection still leaves unit equivalence
+`USER_DECLARED_NOT_VERIFIED`, residual `NOT_COMPUTED`, scoring `NOT_ENABLED`, and every validity,
+weighting, future-admissibility, and learning update off. It is a selection contract, not a scoring
+contract or authority grant.
 
 ## Contract changes
 

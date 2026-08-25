@@ -10,7 +10,13 @@ import pytest
 from readin.cli import main
 from readin.projection import ReadinProjection
 from readin.store import EventLedger
-from readin.synthetic import phase5_events, phase7_events, phase8_events
+from readin.synthetic import (
+    phase5_events,
+    phase7_events,
+    phase8_events,
+    phase8c_events,
+    phase8d_events,
+)
 from readin.workbench import (
     WorkbenchError,
     build_workbench_snapshot,
@@ -115,6 +121,60 @@ def test_workbench_exposes_phase8_readback_without_residual_or_validity_update()
     assert readback["future_admissibility_update_state"] == "NOT_APPLIED"
     assert readback["learning_state"] == "NOT_STARTED"
     assert readback["network_access"] is False
+
+
+def test_workbench_exposes_phase8c_baseline_without_scoring_or_learning() -> None:
+    snapshot = build_workbench_snapshot(ReadinProjection.replay(phase8c_events()), ASSET_ID)
+    asset = snapshot["selected_asset"]
+    baseline = asset["forecasting"]["latest_baseline"]
+    design = asset["forecasting"]["latest_evaluation_design"]
+
+    assert snapshot["generated_from"]["event_count"] == 44
+    assert snapshot["epistemic_limits"]["prediction_state"] == ("PRODUCED_UNCALIBRATED_BASELINE")
+    assert asset["counts"]["forecast_baselines"] == 1
+    assert asset["counts"]["residual_readbacks"] == 0
+    assert design["fitter_selection_state"] == "NOT_SELECTED"
+    assert design["forecast_baseline_state"] == "COMPLETED"
+    assert design["forecast_execution_state"] == "COMPLETED"
+    assert design["prediction_state"] == "PRODUCED_UNCALIBRATED_BASELINE"
+    assert baseline["method_name"] == "USER_DECLARED_CONSTANT"
+    assert baseline["forecast_method_selection_state"] == ("SELECTED_REFERENCE_CONSTANT_BASELINE")
+    assert baseline["prediction_value"] == 0.75
+    assert baseline["input_state"] == "NO_TRAINING_INPUTS_USED"
+    assert baseline["selected_input_observation_ids"] == []
+    assert baseline["calibration_state"] == "NOT_ESTABLISHED"
+    assert baseline["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert baseline["residual_scoring_state"] == "NOT_ENABLED"
+    assert baseline["learning_state"] == "NOT_STARTED"
+    assert baseline["network_access"] is False
+    assert asset["readback"]["latest"] is None
+
+
+def test_workbench_exposes_phase8d_selection_without_residual_or_learning() -> None:
+    snapshot = build_workbench_snapshot(ReadinProjection.replay(phase8d_events()), ASSET_ID)
+    asset = snapshot["selected_asset"]
+    selection = asset["readback"]["latest_selection"]
+
+    assert snapshot["generated_from"]["event_count"] == 46
+    assert asset["counts"]["readback_selection_plans"] == 1
+    assert asset["counts"]["readback_selection_runs"] == 1
+    assert selection["cardinality"] == "EXACTLY_ONE"
+    assert selection["selection_state"] == "UNIQUE_MATCH_SELECTED"
+    assert selection["candidate_count"] == 1
+    assert selection["selected_target_value"] == 1.0
+    assert selection["eligible_observer_frames"][0]["name"] == (
+        "Synthetic independent technical verification"
+    )
+    assert selection["aggregation_policy"] == "PROHIBITED"
+    assert selection["ranking_policy"] == "NONE"
+    assert selection["residual_state"] == "NOT_COMPUTED"
+    assert selection["residual_scoring_state"] == "NOT_ENABLED"
+    assert selection["calibration_state"] == "NOT_ESTABLISHED"
+    assert selection["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert selection["validity_update_state"] == "NOT_APPLIED"
+    assert selection["learning_state"] == "NOT_STARTED"
+    assert selection["network_access"] is False
+    assert asset["readback"]["latest"] is None
 
 
 def test_workbench_projection_supports_empty_catalog_and_rejects_unknown_asset() -> None:

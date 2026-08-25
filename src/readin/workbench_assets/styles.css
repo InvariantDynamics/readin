@@ -520,7 +520,8 @@ p {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 9px;
   font-weight: 400;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 .record-secondary {

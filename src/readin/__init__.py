@@ -1,4 +1,4 @@
-"""READIN Phase 0 through Phase 8B reference runtime."""
+"""READIN Phase 0 through Phase 8D reference runtime."""
 
 from readin.belief import BeliefRuntimeError, execute_belief_revision
 from readin.contracts import ContractViolation, validate_event
@@ -21,7 +21,10 @@ from readin.events import (
     create_evidence_manifested,
     create_fitter_registered,
     create_fitter_run_completed,
+    create_forecast_baseline_completed,
     create_forecast_evaluation_design_created,
+    create_forecast_readback_selection_completed,
+    create_forecast_readback_selection_plan_created,
     create_hypothesis_created,
     create_observation_admitted,
     create_observer_frame_registered,
@@ -38,8 +41,18 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
-from readin.forecasting import ForecastDesignError, create_forecast_evaluation_design
+from readin.forecasting import (
+    ForecastBaselineError,
+    ForecastDesignError,
+    create_forecast_evaluation_design,
+    execute_frozen_forecast_baseline,
+)
 from readin.projection import ProjectionError, ReadinProjection
+from readin.readback_selection import (
+    ReadbackSelectionError,
+    create_readback_selection_plan,
+    execute_readback_selection,
+)
 from readin.residuals import ResidualRuntimeError, execute_residual_readback
 from readin.scenarios import (
     ScenarioRuntimeError,
@@ -55,7 +68,9 @@ __all__ = [
     "DiscriminationRuntimeError",
     "EventLedger",
     "FitterRuntimeError",
+    "ForecastBaselineError",
     "ForecastDesignError",
+    "ReadbackSelectionError",
     "LedgerError",
     "ProjectionError",
     "ReadinProjection",
@@ -78,8 +93,12 @@ __all__ = [
     "create_evidence_manifested",
     "create_fitter_registered",
     "create_fitter_run_completed",
+    "create_forecast_baseline_completed",
     "create_forecast_evaluation_design",
     "create_forecast_evaluation_design_created",
+    "create_forecast_readback_selection_completed",
+    "create_forecast_readback_selection_plan_created",
+    "create_readback_selection_plan",
     "create_hypothesis_created",
     "create_observation_admitted",
     "create_observer_frame_registered",
@@ -93,6 +112,8 @@ __all__ = [
     "create_tracking_started",
     "create_workbench_server",
     "execute_reference_fitter_group",
+    "execute_frozen_forecast_baseline",
+    "execute_readback_selection",
     "execute_residual_readback",
     "execute_belief_revision",
     "execute_discrimination_plan",
@@ -100,4 +121,4 @@ __all__ = [
     "validate_event",
 ]
 
-__version__ = "0.1.0.dev9"
+__version__ = "0.1.0.dev11"

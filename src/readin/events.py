@@ -1,4 +1,4 @@
-"""Typed event factories for the READIN Phase 0 through Phase 8B contracts."""
+"""Typed event factories for the READIN Phase 0 through Phase 8D contracts."""
 
 from __future__ import annotations
 
@@ -815,6 +815,51 @@ def create_forecast_evaluation_design_created(
     return _event(
         "forecast.evaluation_design_created",
         {"forecast_evaluation_design": dict(design)},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_forecast_baseline_completed(
+    baseline: Mapping[str, Any],
+    *,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    return _event(
+        "forecast.baseline_completed",
+        {"forecast_baseline": dict(baseline)},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_forecast_readback_selection_plan_created(
+    plan: Mapping[str, Any],
+    *,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    return _event(
+        "forecast.readback_selection_plan_created",
+        {"readback_selection_plan": dict(plan)},
+        event_id=event_id,
+        occurred_at=event_time,
+    )
+
+
+def create_forecast_readback_selection_completed(
+    run: Mapping[str, Any],
+    *,
+    event_id: str | UUID | None = None,
+    occurred_at: str | datetime | None = None,
+) -> JsonObject:
+    event_time = _timestamp(occurred_at)
+    return _event(
+        "forecast.readback_selection_completed",
+        {"readback_selection_run": dict(run)},
         event_id=event_id,
         occurred_at=event_time,
     )

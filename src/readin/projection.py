@@ -1,4 +1,4 @@
-"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 8B ledger."""
+"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 8D ledger."""
 
 from __future__ import annotations
 
@@ -28,6 +28,20 @@ from readin.fitters import (
     reference_fit_components,
     reference_fitter_spec,
     validate_reference_descriptor,
+)
+from readin.forecasting import (
+    FORECAST_BASELINE_ALGORITHM_ID,
+    ForecastBaselineError,
+    build_forecast_baseline_snapshot,
+    compute_forecast_baseline_components,
+    forecast_baseline_implementation_sha256,
+)
+from readin.readback_selection import (
+    READBACK_SELECTION_ALGORITHM_ID,
+    ReadbackSelectionError,
+    build_readback_selection_snapshot,
+    compute_readback_selection_components,
+    readback_selection_implementation_sha256,
 )
 from readin.residuals import (
     RESIDUAL_ALGORITHM_ID,
@@ -81,11 +95,17 @@ class ReadinProjection:
         self.discrimination_runs: dict[str, dict[str, Any]] = {}
         self.discrimination_receipts: dict[str, dict[str, Any]] = {}
         self.forecast_evaluation_designs: dict[str, dict[str, Any]] = {}
+        self.forecast_baselines: dict[str, dict[str, Any]] = {}
+        self.forecast_baseline_receipts: dict[str, dict[str, Any]] = {}
+        self.readback_selection_plans: dict[str, dict[str, Any]] = {}
+        self.readback_selection_runs: dict[str, dict[str, Any]] = {}
+        self.readback_selection_receipts: dict[str, dict[str, Any]] = {}
         self.residual_readbacks: dict[str, dict[str, Any]] = {}
         self.residual_receipts: dict[str, dict[str, Any]] = {}
         self.asset_versions: dict[str, list[dict[str, Any]]] = {}
         self.event_ids: set[str] = set()
         self._evidence_digests: dict[str, str] = {}
+        self._observation_recorded_at: dict[str, str] = {}
         self._dependency_groups: dict[str, set[str]] = {}
         self._dependency_graph: dict[str, set[str]] = {}
         self._candidate_pairs: dict[tuple[str, str], str] = {}
@@ -101,6 +121,9 @@ class ReadinProjection:
         self._latest_scenario_run: dict[str, str] = {}
         self._latest_discrimination_run: dict[str, str] = {}
         self._scenario_forecast_evaluation_design: dict[str, str] = {}
+        self._design_forecast_baseline: dict[str, str] = {}
+        self._baseline_readback_selection_plan: dict[str, str] = {}
+        self._plan_readback_selection_run: dict[str, str] = {}
         self._scenario_readback: dict[str, str] = {}
         self._events: list[dict[str, Any]] = []
 
@@ -207,6 +230,7 @@ class ReadinProjection:
         self._validate_source_alignment(observation)
 
         self.observations[observation_id] = observation
+        self._observation_recorded_at[observation_id] = event["occurred_at"]
         for entity_id in observation["subject_entities"]:
             self._advance_asset(entity_id, event)
 
@@ -1031,6 +1055,214 @@ class ReadinProjection:
         self._scenario_readback[scenario_run_id] = readback_id
         self._advance_asset(asset_id, event)
 
+    def _apply_forecast_baseline_completed(self, event: dict[str, Any]) -> None:
+        baseline = deepcopy(event["payload"]["forecast_baseline"])
+        baseline_id = baseline["id"]
+        receipt = baseline["execution_receipt"]
+        receipt_id = receipt["id"]
+        if baseline_id in self.forecast_baselines:
+            raise ProjectionError(f"duplicate forecast baseline id: {baseline_id}")
+        if receipt_id in self.forecast_baseline_receipts:
+            raise ProjectionError(f"duplicate forecast baseline receipt id: {receipt_id}")
+        design_id = baseline["forecast_evaluation_design_id"]
+        if design_id not in self.forecast_evaluation_designs:
+            raise ProjectionError(
+                f"forecast baseline references unknown evaluation design: {design_id}"
+            )
+        if design_id in self._design_forecast_baseline:
+            raise ProjectionError("forecast evaluation design already has a frozen baseline")
+        design = self.forecast_evaluation_designs[design_id]
+        asset_id = design["asset_entity_id"]
+        scenario_id = design["scenario_id"]
+        if baseline["asset_entity_id"] != asset_id or receipt["asset_entity_id"] != asset_id:
+            raise ProjectionError("forecast baseline asset binding mismatch")
+        if baseline["scenario_id"] != scenario_id or receipt["scenario_id"] != scenario_id:
+            raise ProjectionError("forecast baseline scenario binding mismatch")
+        if receipt["forecast_baseline_id"] != baseline_id:
+            raise ProjectionError("forecast baseline receipt identity mismatch")
+        if receipt["forecast_evaluation_design_id"] != design_id:
+            raise ProjectionError("forecast baseline receipt design binding mismatch")
+        if receipt["asset_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("forecast baseline asset state version mismatch")
+        if not (baseline["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("forecast baseline times must match ledger-recorded time")
+
+        recorded_at = self._parse_timestamp(baseline["recorded_at"])
+        if recorded_at < self._parse_timestamp(design["created_at"]):
+            raise ProjectionError("forecast baseline precedes its evaluation design")
+        if recorded_at >= self._parse_timestamp(design["timing"]["forecast_origin"]):
+            raise ProjectionError("forecast baseline was not recorded before forecast origin")
+
+        try:
+            snapshot = build_forecast_baseline_snapshot(self, design_id)
+            components = compute_forecast_baseline_components(
+                snapshot, baseline["prediction"]["value"]
+            )
+        except ForecastBaselineError as error:
+            raise ProjectionError(str(error)) from error
+        expected_receipt_fields = {
+            "forecast_evaluation_design_sha256": canonical_sha256(
+                snapshot["forecast_evaluation_design"]
+            ),
+            "scenario_sha256": canonical_sha256(snapshot["scenario"]),
+            "input_snapshot_sha256": canonical_sha256(snapshot),
+            "algorithm_id": FORECAST_BASELINE_ALGORITHM_ID,
+            "implementation_sha256": forecast_baseline_implementation_sha256(),
+            "outcome_sha256": canonical_sha256(components),
+        }
+        mismatched = [
+            key for key, expected in expected_receipt_fields.items() if receipt[key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"forecast baseline receipt binding mismatch: {mismatched}")
+        for key, expected in components.items():
+            if baseline[key] != expected:
+                raise ProjectionError(f"forecast baseline {key} does not match reference execution")
+
+        self.forecast_baselines[baseline_id] = baseline
+        self.forecast_baseline_receipts[receipt_id] = receipt
+        self._design_forecast_baseline[design_id] = baseline_id
+        self._advance_asset(asset_id, event)
+
+    def _apply_forecast_readback_selection_plan_created(self, event: dict[str, Any]) -> None:
+        plan = deepcopy(event["payload"]["readback_selection_plan"])
+        plan_id = plan["id"]
+        if plan_id in self.readback_selection_plans:
+            raise ProjectionError(f"duplicate readback selection plan id: {plan_id}")
+        baseline_id = plan["forecast_baseline_id"]
+        if baseline_id not in self.forecast_baselines:
+            raise ProjectionError(
+                f"readback selection plan references unknown baseline: {baseline_id}"
+            )
+        if baseline_id in self._baseline_readback_selection_plan:
+            raise ProjectionError("forecast baseline already has a readback selection plan")
+        baseline = self.forecast_baselines[baseline_id]
+        design = self.forecast_evaluation_designs[baseline["forecast_evaluation_design_id"]]
+        asset_id = baseline["asset_entity_id"]
+        if plan["asset_entity_id"] != asset_id:
+            raise ProjectionError("readback selection plan asset binding mismatch")
+        if plan["forecast_evaluation_design_id"] != design["id"]:
+            raise ProjectionError("readback selection plan design binding mismatch")
+        if plan["scenario_id"] != baseline["scenario_id"]:
+            raise ProjectionError("readback selection plan scenario binding mismatch")
+        if plan["initial_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("readback selection plan initial state version mismatch")
+        if plan["created_at"] != event["occurred_at"]:
+            raise ProjectionError("readback selection plan time must match ledger-recorded time")
+        if plan["eligible_observer_frame_ids"] != sorted(plan["eligible_observer_frame_ids"]):
+            raise ProjectionError("eligible observer frame ids must use sorted order")
+        missing_frames = sorted(set(plan["eligible_observer_frame_ids"]) - self.frames.keys())
+        if missing_frames:
+            raise ProjectionError(
+                f"readback selection plan references unknown frames: {missing_frames}"
+            )
+        expected_target = {
+            "observation_type": design["target"]["observation_type"],
+            "structured_field_path": design["target"]["structured_field_path"],
+            "value_kind": "NUMBER",
+            "unit": design["target"]["unit"],
+            "unit_match_state": "USER_DECLARED_NOT_VERIFIED",
+        }
+        if plan["target"] != expected_target:
+            raise ProjectionError("readback selection plan target binding mismatch")
+        if plan["timing"]["forecast_origin"] != design["timing"]["forecast_origin"]:
+            raise ProjectionError("readback selection plan forecast origin mismatch")
+        if plan["timing"]["horizon_end"] != design["timing"]["horizon_end"]:
+            raise ProjectionError("readback selection plan horizon mismatch")
+        created_at = self._parse_timestamp(plan["created_at"])
+        if created_at < self._parse_timestamp(baseline["recorded_at"]):
+            raise ProjectionError("readback selection plan precedes its forecast baseline")
+        if created_at >= self._parse_timestamp(design["timing"]["forecast_origin"]):
+            raise ProjectionError("readback selection plan was not recorded before forecast origin")
+        if self._parse_timestamp(plan["timing"]["observed_window_end"]) <= self._parse_timestamp(
+            design["timing"]["horizon_end"]
+        ):
+            raise ProjectionError("readback observed window does not follow forecast horizon")
+        if self._parse_timestamp(plan["timing"]["ledger_admission_cutoff"]) < self._parse_timestamp(
+            plan["timing"]["observed_window_end"]
+        ):
+            raise ProjectionError("readback admission cutoff precedes observed window end")
+
+        self.readback_selection_plans[plan_id] = plan
+        self._baseline_readback_selection_plan[baseline_id] = plan_id
+        self._advance_asset(asset_id, event)
+
+    def _apply_forecast_readback_selection_completed(self, event: dict[str, Any]) -> None:
+        run = deepcopy(event["payload"]["readback_selection_run"])
+        run_id = run["id"]
+        receipt = run["execution_receipt"]
+        receipt_id = receipt["id"]
+        if run_id in self.readback_selection_runs:
+            raise ProjectionError(f"duplicate readback selection run id: {run_id}")
+        if receipt_id in self.readback_selection_receipts:
+            raise ProjectionError(f"duplicate readback selection receipt id: {receipt_id}")
+        plan_id = run["readback_selection_plan_id"]
+        if plan_id not in self.readback_selection_plans:
+            raise ProjectionError(f"readback selection run references unknown plan: {plan_id}")
+        if plan_id in self._plan_readback_selection_run:
+            raise ProjectionError("readback selection plan already has a completed run")
+        plan = self.readback_selection_plans[plan_id]
+        asset_id = plan["asset_entity_id"]
+        identity_fields = {
+            "asset_entity_id": asset_id,
+            "forecast_baseline_id": plan["forecast_baseline_id"],
+            "forecast_evaluation_design_id": plan["forecast_evaluation_design_id"],
+            "scenario_id": plan["scenario_id"],
+        }
+        if any(run[key] != expected for key, expected in identity_fields.items()):
+            raise ProjectionError("readback selection run binding mismatch")
+        if receipt["readback_selection_run_id"] != run_id:
+            raise ProjectionError("readback selection receipt run binding mismatch")
+        if receipt["readback_selection_plan_id"] != plan_id:
+            raise ProjectionError("readback selection receipt plan binding mismatch")
+        if any(receipt[key] != expected for key, expected in identity_fields.items()):
+            raise ProjectionError("readback selection receipt identity mismatch")
+        if receipt["asset_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("readback selection receipt asset state version mismatch")
+        if not (run["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("readback selection times must match ledger-recorded time")
+        if self._parse_timestamp(run["recorded_at"]) < self._parse_timestamp(
+            plan["timing"]["ledger_admission_cutoff"]
+        ):
+            raise ProjectionError("readback selection executed before admission cutoff")
+
+        try:
+            snapshot = build_readback_selection_snapshot(self, plan_id)
+            components = compute_readback_selection_components(snapshot)
+        except ReadbackSelectionError as error:
+            raise ProjectionError(str(error)) from error
+        expected_receipt_fields = {
+            "plan_sha256": canonical_sha256(plan),
+            "forecast_baseline_sha256": canonical_sha256(snapshot["forecast_baseline"]),
+            "forecast_evaluation_design_sha256": canonical_sha256(
+                snapshot["forecast_evaluation_design"]
+            ),
+            "scenario_sha256": canonical_sha256(snapshot["scenario"]),
+            "eligible_observer_frame_ids": plan["eligible_observer_frame_ids"],
+            "eligible_observer_frames_sha256": canonical_sha256(
+                snapshot["eligible_observer_frames"]
+            ),
+            "input_snapshot_sha256": canonical_sha256(snapshot),
+            "algorithm_id": READBACK_SELECTION_ALGORITHM_ID,
+            "implementation_sha256": readback_selection_implementation_sha256(),
+            "outcome_sha256": canonical_sha256(components),
+        }
+        mismatched = [
+            key for key, expected in expected_receipt_fields.items() if receipt[key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"readback selection receipt binding mismatch: {mismatched}")
+        for key, expected in components.items():
+            if run[key] != expected:
+                raise ProjectionError(
+                    f"readback selection {key} does not match reference execution"
+                )
+
+        self.readback_selection_runs[run_id] = run
+        self.readback_selection_receipts[receipt_id] = receipt
+        self._plan_readback_selection_run[plan_id] = run_id
+        self._advance_asset(asset_id, event)
+
     def _apply_forecast_evaluation_design_created(self, event: dict[str, Any]) -> None:
         design = deepcopy(event["payload"]["forecast_evaluation_design"])
         design_id = design["id"]
@@ -1492,6 +1724,22 @@ class ReadinProjection:
         forecast_evaluation_designs.sort(
             key=lambda item: (item["design"]["created_at"], item["design"]["id"])
         )
+        forecast_baselines = [
+            self.forecast_baseline_view(baseline_id)
+            for baseline_id, baseline in self.forecast_baselines.items()
+            if baseline["asset_entity_id"] == entity_id
+        ]
+        forecast_baselines.sort(
+            key=lambda item: (item["baseline"]["recorded_at"], item["baseline"]["id"])
+        )
+        readback_selection_plans = [
+            self.readback_selection_plan_view(plan_id)
+            for plan_id, plan in self.readback_selection_plans.items()
+            if plan["asset_entity_id"] == entity_id
+        ]
+        readback_selection_plans.sort(
+            key=lambda item: (item["plan"]["created_at"], item["plan"]["id"])
+        )
         residual_readbacks = [
             self.residual_readback_view(readback_id)
             for readback_id, readback in self.residual_readbacks.items()
@@ -1532,6 +1780,8 @@ class ReadinProjection:
             "scenarios": scenarios,
             "discrimination_plans": discrimination_plans,
             "forecast_evaluation_designs": forecast_evaluation_designs,
+            "forecast_baselines": forecast_baselines,
+            "readback_selection_plans": readback_selection_plans,
             "residual_readbacks": residual_readbacks,
             "evidence_dependencies": dependencies,
             "observer_frames": [deepcopy(self.frames[item]) for item in frame_ids],
@@ -2034,15 +2284,82 @@ class ReadinProjection:
         design = deepcopy(self.forecast_evaluation_designs[design_id])
         scenario = deepcopy(self.scenarios[design["scenario_id"]])
         run_id = self._latest_scenario_run.get(design["scenario_id"])
+        baseline_id = self._design_forecast_baseline.get(design_id)
+        baseline = (
+            deepcopy(self.forecast_baselines[baseline_id]) if baseline_id is not None else None
+        )
         return {
             "design": design,
             "scenario": scenario,
             "scenario_run": (deepcopy(self.scenario_runs[run_id]) if run_id is not None else None),
+            "forecast_baseline": baseline,
             "forecast_capable_fitter_state": "NO_ELIGIBLE_FITTER_REGISTERED",
             "eligible_fitter_ids": [],
-            "forecast_execution_state": "NOT_STARTED",
-            "prediction_state": "NOT_PRODUCED",
+            "forecast_baseline_state": "COMPLETED" if baseline is not None else "NOT_STARTED",
+            "forecast_execution_state": (
+                baseline["forecast_execution_state"] if baseline is not None else "NOT_STARTED"
+            ),
+            "prediction_state": (
+                baseline["prediction"]["prediction_state"]
+                if baseline is not None
+                else "NOT_PRODUCED"
+            ),
             "calibration_state": "NOT_ESTABLISHED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def forecast_baseline_view(self, baseline_id: str) -> dict[str, Any]:
+        if baseline_id not in self.forecast_baselines:
+            raise ProjectionError(f"unknown forecast baseline: {baseline_id}")
+        baseline = deepcopy(self.forecast_baselines[baseline_id])
+        return {
+            "baseline": baseline,
+            "forecast_evaluation_design": deepcopy(
+                self.forecast_evaluation_designs[baseline["forecast_evaluation_design_id"]]
+            ),
+            "scenario": deepcopy(self.scenarios[baseline["scenario_id"]]),
+            "residual_scoring_state": "NOT_ENABLED",
+            "calibration_state": "NOT_ESTABLISHED",
+            "empirical_validity_state": "NOT_ESTABLISHED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def readback_selection_plan_view(self, plan_id: str) -> dict[str, Any]:
+        if plan_id not in self.readback_selection_plans:
+            raise ProjectionError(f"unknown readback selection plan: {plan_id}")
+        plan = deepcopy(self.readback_selection_plans[plan_id])
+        run_id = self._plan_readback_selection_run.get(plan_id)
+        return {
+            "plan": plan,
+            "run": (deepcopy(self.readback_selection_runs[run_id]) if run_id is not None else None),
+            "forecast_baseline": deepcopy(self.forecast_baselines[plan["forecast_baseline_id"]]),
+            "forecast_evaluation_design": deepcopy(
+                self.forecast_evaluation_designs[plan["forecast_evaluation_design_id"]]
+            ),
+            "eligible_observer_frames": [
+                deepcopy(self.frames[item]) for item in plan["eligible_observer_frame_ids"]
+            ],
+            "residual_scoring_state": "NOT_ENABLED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def readback_selection_run_view(self, run_id: str) -> dict[str, Any]:
+        if run_id not in self.readback_selection_runs:
+            raise ProjectionError(f"unknown readback selection run: {run_id}")
+        run = deepcopy(self.readback_selection_runs[run_id])
+        view = self.readback_selection_plan_view(run["readback_selection_plan_id"])
+        return {
+            "run": run,
+            "plan": view["plan"],
+            "forecast_baseline": view["forecast_baseline"],
+            "forecast_evaluation_design": view["forecast_evaluation_design"],
+            "eligible_observer_frames": view["eligible_observer_frames"],
+            "selected_observation": (
+                deepcopy(self.observations[run["selected_observation_id"]])
+                if run["selected_observation_id"] is not None
+                else None
+            ),
+            "residual_scoring_state": "NOT_ENABLED",
             "authority_state": "NO_AUTHORITY",
         }
 
@@ -2240,6 +2557,12 @@ class ReadinProjection:
             return {payload["discrimination_run"]["asset_entity_id"]}
         if event_type == "forecast.evaluation_design_created":
             return {payload["forecast_evaluation_design"]["asset_entity_id"]}
+        if event_type == "forecast.baseline_completed":
+            return {payload["forecast_baseline"]["asset_entity_id"]}
+        if event_type == "forecast.readback_selection_plan_created":
+            return {payload["readback_selection_plan"]["asset_entity_id"]}
+        if event_type == "forecast.readback_selection_completed":
+            return {payload["readback_selection_run"]["asset_entity_id"]}
         if event_type == "residual.readback_completed":
             return {payload["residual_readback"]["asset_entity_id"]}
         if event_type == "evidence.linked":
@@ -2294,6 +2617,12 @@ class ReadinProjection:
             return event["payload"]["discrimination_run"]["recorded_at"]
         if event_type == "forecast.evaluation_design_created":
             return event["payload"]["forecast_evaluation_design"]["created_at"]
+        if event_type == "forecast.baseline_completed":
+            return event["payload"]["forecast_baseline"]["recorded_at"]
+        if event_type == "forecast.readback_selection_plan_created":
+            return event["payload"]["readback_selection_plan"]["created_at"]
+        if event_type == "forecast.readback_selection_completed":
+            return event["payload"]["readback_selection_run"]["recorded_at"]
         if event_type == "residual.readback_completed":
             return event["payload"]["residual_readback"]["recorded_at"]
         return event["occurred_at"]
@@ -2356,6 +2685,18 @@ class ReadinProjection:
                 "forecast_evaluation_design_count": sum(
                     entity_id == design["asset_entity_id"]
                     for design in self.forecast_evaluation_designs.values()
+                ),
+                "forecast_baseline_count": sum(
+                    entity_id == baseline["asset_entity_id"]
+                    for baseline in self.forecast_baselines.values()
+                ),
+                "readback_selection_plan_count": sum(
+                    entity_id == plan["asset_entity_id"]
+                    for plan in self.readback_selection_plans.values()
+                ),
+                "readback_selection_run_count": sum(
+                    entity_id == run["asset_entity_id"]
+                    for run in self.readback_selection_runs.values()
                 ),
                 "residual_readback_count": sum(
                     entity_id == readback["asset_entity_id"]
