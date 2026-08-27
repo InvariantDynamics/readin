@@ -14,6 +14,7 @@ from readin.synthetic import (
     phase8_events,
     phase8d_events,
     phase8e_events,
+    phase8f_events,
 )
 
 
@@ -566,6 +567,63 @@ def test_cli_computes_and_exposes_descriptive_forecast_residual(
     assert residual["execution_receipt"]["network_access"] is False
     assert output["authority_state"] == "NO_AUTHORITY"
 
+
+def test_cli_assesses_and_exposes_fail_closed_forecast_validity(
+    tmp_path: Path, capsys: object
+) -> None:
+    fixture = phase8f_events()
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in fixture[:47]:
+        ledger.append(event)
+
+    result = main(
+        [
+            "assess-forecast-validity-update",
+            "--ledger",
+            str(ledger.path),
+            "--residual",
+            "e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e0",
+            "--assessment-id",
+            "f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0",
+            "--occurred-at",
+            "2026-09-23T12:00:03Z",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assessment = output["forecast_validity_assessment"]
+    assert assessment["eligibility_state"] == "INELIGIBLE_VALIDITY_UPDATE"
+    assert assessment["decision_state"] == "ABSTAINED"
+    assert assessment["target_fitter_id"] is None
+    assert assessment["validity_update_state"] == "NOT_APPLIED"
+    assert assessment["learning_state"] == "NOT_STARTED"
+    assert assessment["execution_receipt"]["network_access"] is False
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+    result = main(
+        [
+            "show-forecast-validity-assessment",
+            "--ledger",
+            str(ledger.path),
+            "--assessment",
+            "f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["forecast_validity_assessment"]["blockers"] == [
+        "NO_REGISTERED_FORECAST_FITTER",
+        "REFERENCE_BASELINE_NOT_TRAINED_MODEL",
+        "SINGLE_READBACK_ONLY",
+        "UNIT_EQUIVALENCE_NOT_VERIFIED",
+        "NO_PREDECLARED_VALIDATION_CORPUS",
+        "UNCERTAINTY_NOT_ESTIMATED",
+    ]
+    assert output["validity_update_state"] == "NOT_APPLIED"
+    assert output["learning_state"] == "NOT_STARTED"
+    assert output["authority_state"] == "NO_AUTHORITY"
+
     result = main(
         [
             "show-forecast-residual",
@@ -582,6 +640,73 @@ def test_cli_computes_and_exposes_descriptive_forecast_residual(
     assert output["calibration_state"] == "NOT_ESTABLISHED"
     assert output["empirical_validity_state"] == "NOT_ESTABLISHED"
     assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_registers_and_exposes_prospective_forecast_fitter_specification(
+    tmp_path: Path, capsys: object
+) -> None:
+    ledger = EventLedger(tmp_path / "events.jsonl")
+    ledger.initialize()
+    for event in phase8f_events():
+        ledger.append(event)
+
+    feature = json.dumps(
+        {
+            "name": "prior_activity_score",
+            "observation_type": "independent_record.program_activity_follow_up",
+            "structured_field_path": ["activity_score"],
+            "unit": "synthetic_activity_index",
+        }
+    )
+    result = main(
+        [
+            "register-forecast-fitter-specification",
+            "--ledger",
+            str(ledger.path),
+            "--asset",
+            "11111111-1111-4111-8111-111111111111",
+            "--name",
+            "CLI linear forecast candidate",
+            "--model-family",
+            "LINEAR_REGRESSION",
+            "--target-observation-type",
+            "independent_record.program_activity_follow_up",
+            "--target-field",
+            "activity_score",
+            "--target-unit",
+            "synthetic_activity_index",
+            "--feature-json",
+            feature,
+            "--specification-id",
+            "f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3",
+            "--occurred-at",
+            "2026-09-23T12:00:04Z",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    specification = output["specification"]
+    assert specification["registration_state"] == "REGISTERED_SPECIFICATION_ONLY"
+    assert specification["training_contract"]["training_state"] == "NOT_STARTED"
+    assert specification["execution_state"] == "NOT_ENABLED"
+    assert specification["prediction_state"] == "NOT_PRODUCED"
+    assert output["retroactive_effect_state"] == "NONE"
+    assert output["authority_state"] == "NO_AUTHORITY"
+
+    result = main(
+        [
+            "show-forecast-fitter-specification",
+            "--ledger",
+            str(ledger.path),
+            "--specification",
+            "f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+    assert result == 0
+    assert output["specification"]["model_family"] == "LINEAR_REGRESSION"
+    assert output["earlier_validity_assessment_ids"] == ["f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0"]
+    assert output["retroactive_effect_state"] == "NONE"
 
 
 def test_cli_records_and_exposes_residual_readback_abstention(

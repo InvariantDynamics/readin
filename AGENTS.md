@@ -28,7 +28,7 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 8E slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 8G slices are local-first and manual-input only:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -75,6 +75,13 @@ The Phase 0 through bounded Phase 8E slices are local-first and manual-input onl
 - one deterministic descriptive residual for a frozen constant and one uniquely selected readback;
 - signed residual and absolute error retained with unit equivalence unverified and single-readback
   uncertainty not estimated;
+- replay-verifiable validity-update eligibility assessment with explicit blocking conditions;
+- forecast-validity assessment fixed to `INELIGIBLE_VALIDITY_UPDATE` and `ABSTAINED`, with no
+  target fitter or validity, weighting, future-admissibility, or learning update;
+- one prospective `LINEAR_REGRESSION` forecast-fitter specification with numeric target and feature
+  contracts, but no implementation, training data, temporal split, controls, selection, or execution;
+- fitter applicability fixed to future forecasts only, with retroactive application prohibited and
+  prior validity assessments unchanged;
 - later manual-observation binding to an earlier scenario horizon;
 - fail-closed forecast-baseline eligibility with digest-bound readback receipts;
 - residual, validity, weighting, future-admissibility, and learning updates fixed off when no
@@ -133,6 +140,20 @@ absolute error for the frozen user-declared constant. Unit equivalence remains
 `NOT_ESTABLISHED`; validity, weighting, future-admissibility, and learning updates remain off. This
 is not forecast validation, model comparison, a trained fitter, an operational signal, or an
 authority grant.
+Phase 8F adds a replay-verifiable eligibility gate after the descriptive residual. It records six
+blocking conditions: no registered forecast fitter, a reference baseline rather than a trained
+model, only one readback, unverified unit equivalence, no predeclared validation corpus, and no
+uncertainty estimate. The assessment is therefore fixed to `INELIGIBLE_VALIDITY_UPDATE` and
+`ABSTAINED`, with no target fitter and no validity, weighting, future-admissibility, or learning
+update. This is an explicit stop condition, not evidence of model invalidity or validation.
+Phase 8G adds one typed, asset-bound `LINEAR_REGRESSION` forecast-fitter specification after the
+historical assessment. It declares numeric target and pre-origin feature contracts, a squared-error
+objective, and requirements for a temporal split, negative controls, per-design cutoff, point
+prediction, and uncertainty output. The specification is future-only and
+`REGISTERED_SPECIFICATION_ONLY`; implementation is `NOT_PROVIDED`, training is `NOT_STARTED`,
+selection is `NOT_SELECTED`, execution is `NOT_ENABLED`, and prediction is `NOT_PRODUCED`.
+Registration cannot remove or rewrite any Phase 8F blocker and is not a trained or forecast-capable
+model claim.
 
 ## Contract changes
 

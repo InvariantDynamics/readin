@@ -1,4 +1,4 @@
-"""Read-only workbench through bounded Phase 8E descriptive residual arithmetic."""
+"""Read-only workbench through bounded Phase 8G fitter specification registration."""
 
 from __future__ import annotations
 
@@ -425,6 +425,76 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "recorded_at": result["recorded_at"],
         }
 
+    forecast_validity_assessment = None
+    if view["forecast_validity_assessments"]:
+        item = view["forecast_validity_assessments"][-1]
+        assessment = item["forecast_validity_assessment"]
+        basis = assessment["assessment_basis"]
+        forecast_validity_assessment = {
+            "id": assessment["id"],
+            "forecast_residual_id": assessment["forecast_residual_id"],
+            "eligibility_state": assessment["eligibility_state"],
+            "decision_state": assessment["decision_state"],
+            "blockers": deepcopy(assessment["blockers"]),
+            "target_fitter_id": assessment["target_fitter_id"],
+            "target_fitter_state": assessment["target_fitter_state"],
+            "residual_use_state": assessment["residual_use_state"],
+            "forecast_method": basis["forecast_method"],
+            "sample_count": basis["sample_count"],
+            "unit_match_state": basis["unit_match_state"],
+            "uncertainty_state": basis["uncertainty_state"],
+            "validation_corpus_state": basis["validation_corpus_state"],
+            "calibration_state": assessment["calibration_state"],
+            "empirical_validity_state": assessment["empirical_validity_state"],
+            "validity_update_state": assessment["validity_update_state"],
+            "weighting_update_state": assessment["weighting_update_state"],
+            "future_admissibility_update_state": assessment["future_admissibility_update_state"],
+            "learning_state": assessment["learning_state"],
+            "interpretation": assessment["interpretation"],
+            "network_access": assessment["execution_receipt"]["network_access"],
+            "recorded_at": assessment["recorded_at"],
+        }
+
+    forecast_fitter_specification = None
+    if view["forecast_fitter_specifications"]:
+        item = view["forecast_fitter_specifications"][-1]
+        specification = item["specification"]
+        training = specification["training_contract"]
+        output = specification["output_contract"]
+        applicability = specification["applicability"]
+        forecast_fitter_specification = {
+            "id": specification["id"],
+            "name": specification["name"],
+            "model_family": specification["model_family"],
+            "registration_state": specification["registration_state"],
+            "capability_state": specification["capability_state"],
+            "target_observation_type": specification["target_contract"]["observation_type"],
+            "target_structured_field_path": deepcopy(
+                specification["target_contract"]["structured_field_path"]
+            ),
+            "target_unit": specification["target_contract"]["unit"],
+            "feature_contracts": deepcopy(specification["feature_contracts"]),
+            "objective": training["objective"],
+            "training_data_state": training["training_data_state"],
+            "training_state": training["training_state"],
+            "temporal_split_state": training["temporal_split_state"],
+            "negative_controls_state": training["negative_controls_state"],
+            "implementation_state": specification["implementation_state"],
+            "selection_state": specification["selection_state"],
+            "execution_state": specification["execution_state"],
+            "prediction_state": specification["prediction_state"],
+            "uncertainty_state": output["uncertainty_state"],
+            "validation_corpus_state": specification["validation_corpus_state"],
+            "calibration_state": specification["calibration_state"],
+            "empirical_validity_state": specification["empirical_validity_state"],
+            "temporal_scope": applicability["temporal_scope"],
+            "retroactive_application_state": applicability["retroactive_application_state"],
+            "prior_assessment_effect": applicability["prior_assessment_effect"],
+            "earlier_validity_assessment_ids": deepcopy(item["earlier_validity_assessment_ids"]),
+            "network_access": specification["network_access"],
+            "registered_at": specification["registered_at"],
+        }
+
     residual_readback = None
     if view["residual_readbacks"]:
         item = view["residual_readbacks"][-1]
@@ -488,6 +558,8 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
                 item["run"] is not None for item in view["readback_selection_plans"]
             ),
             "forecast_residuals": len(view["forecast_residuals"]),
+            "forecast_validity_assessments": len(view["forecast_validity_assessments"]),
+            "forecast_fitter_specifications": len(view["forecast_fitter_specifications"]),
             "residual_readbacks": len(view["residual_readbacks"]),
             "timeline_events": len(timeline),
         },
@@ -548,11 +620,13 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
         "forecasting": {
             "latest_evaluation_design": forecast_design,
             "latest_baseline": forecast_baseline,
+            "latest_fitter_specification": forecast_fitter_specification,
         },
         "readback": {
             "latest": residual_readback,
             "latest_selection": readback_selection,
             "latest_forecast_residual": forecast_residual,
+            "latest_validity_assessment": forecast_validity_assessment,
         },
         "timeline": [
             {
