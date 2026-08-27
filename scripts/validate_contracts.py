@@ -1,4 +1,4 @@
-"""Validate the schema, Phase 8E descriptive residual, and fail-closed vectors."""
+"""Validate the schema, Phase 8G fitter specification, and fail-closed vectors."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from readin.contracts import ContractViolation, load_event_schema, validate_even
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
 from readin.residuals import ResidualRuntimeError, build_residual_snapshot
-from readin.synthetic import phase8_events, phase8e_events
+from readin.synthetic import phase8_events, phase8g_events
 from readin.workbench import WorkbenchError, build_workbench_snapshot, validate_loopback_host
 
 
@@ -25,7 +25,7 @@ def _must_reject_contract(event: dict[str, object]) -> None:
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
-    events = phase8e_events()
+    events = phase8g_events()
     residual_events = phase8_events()
     for event in events:
         validate_event(event)
@@ -139,6 +139,42 @@ def main() -> None:
         "network_access"
     ] = True
     _must_reject_contract(invalid_forecast_residual_network)
+
+    invalid_forecast_validity_update = deepcopy(events[47])
+    invalid_forecast_validity_update["payload"]["forecast_validity_assessment"][
+        "validity_update_state"
+    ] = "APPLIED"
+    _must_reject_contract(invalid_forecast_validity_update)
+
+    invalid_forecast_validity_fitter = deepcopy(events[47])
+    invalid_forecast_validity_fitter["payload"]["forecast_validity_assessment"][
+        "target_fitter_id"
+    ] = "55555555-5555-4555-8555-555555555551"
+    _must_reject_contract(invalid_forecast_validity_fitter)
+
+    invalid_forecast_validity_network = deepcopy(events[47])
+    invalid_forecast_validity_network["payload"]["forecast_validity_assessment"][
+        "execution_receipt"
+    ]["network_access"] = True
+    _must_reject_contract(invalid_forecast_validity_network)
+
+    invalid_forecast_fitter_training = deepcopy(events[48])
+    invalid_forecast_fitter_training["payload"]["forecast_fitter_specification"][
+        "training_contract"
+    ]["training_state"] = "COMPLETED"
+    _must_reject_contract(invalid_forecast_fitter_training)
+
+    invalid_forecast_fitter_retroactivity = deepcopy(events[48])
+    invalid_forecast_fitter_retroactivity["payload"]["forecast_fitter_specification"][
+        "applicability"
+    ]["retroactive_application_state"] = "ALLOWED"
+    _must_reject_contract(invalid_forecast_fitter_retroactivity)
+
+    invalid_forecast_fitter_network = deepcopy(events[48])
+    invalid_forecast_fitter_network["payload"]["forecast_fitter_specification"][
+        "network_access"
+    ] = True
+    _must_reject_contract(invalid_forecast_fitter_network)
 
     try:
         ReadinProjection.replay([events[4]])
@@ -399,6 +435,56 @@ def main() -> None:
     else:
         raise AssertionError("non-reference forecast residual arithmetic was accepted")
 
+    invalid_forecast_validity_receipt = deepcopy(events[47])
+    invalid_forecast_validity_receipt["payload"]["forecast_validity_assessment"][
+        "execution_receipt"
+    ]["input_snapshot_sha256"] = "0" * 64
+    try:
+        ReadinProjection.replay([*events[:47], invalid_forecast_validity_receipt])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("forecast validity gate accepted an invalid snapshot digest")
+
+    invalid_forecast_validity_identity = deepcopy(events[47])
+    invalid_forecast_validity_identity["payload"]["forecast_validity_assessment"]["scenario_id"] = (
+        "00000000-0000-4000-8000-000000000000"
+    )
+    try:
+        ReadinProjection.replay([*events[:47], invalid_forecast_validity_identity])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("forecast validity gate accepted identity drift")
+
+    invalid_forecast_fitter_state = deepcopy(events[48])
+    invalid_forecast_fitter_state["payload"]["forecast_fitter_specification"][
+        "initial_state_version"
+    ] = "00000000-0000-4000-8000-000000000000"
+    try:
+        ReadinProjection.replay([*events[:48], invalid_forecast_fitter_state])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("forecast fitter specification accepted state drift")
+
+    invalid_forecast_fitter_features = deepcopy(events[48])
+    duplicate_feature = deepcopy(
+        invalid_forecast_fitter_features["payload"]["forecast_fitter_specification"][
+            "feature_contracts"
+        ][0]
+    )
+    duplicate_feature["structured_field_path"] = ["different_activity_score"]
+    invalid_forecast_fitter_features["payload"]["forecast_fitter_specification"][
+        "feature_contracts"
+    ].append(duplicate_feature)
+    try:
+        ReadinProjection.replay([*events[:48], invalid_forecast_fitter_features])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("forecast fitter specification accepted duplicate feature names")
+
     baseline_view = projection.forecast_baseline_view("c0c0c0c0-c0c0-40c0-80c0-c0c0c0c0c0c0")
     if baseline_view["baseline"]["residual_scoring_state"] != "NOT_ENABLED":
         raise AssertionError("forecast baseline enabled residual scoring")
@@ -420,6 +506,34 @@ def main() -> None:
         raise AssertionError("descriptive residual initiated learning")
     if forecast_residual["execution_receipt"]["network_access"]:
         raise AssertionError("forecast residual acquired network access")
+    validity_view = projection.forecast_validity_assessment_view(
+        "f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0"
+    )
+    validity = validity_view["forecast_validity_assessment"]
+    if validity["eligibility_state"] != "INELIGIBLE_VALIDITY_UPDATE":
+        raise AssertionError("forecast validity gate suppressed ineligibility")
+    if validity["decision_state"] != "ABSTAINED":
+        raise AssertionError("forecast validity gate failed to abstain")
+    forecast_fitter_view = projection.forecast_fitter_specification_view(
+        "f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3"
+    )
+    forecast_fitter = forecast_fitter_view["specification"]
+    if forecast_fitter["registration_state"] != "REGISTERED_SPECIFICATION_ONLY":
+        raise AssertionError("forecast fitter registration exceeded specification scope")
+    if forecast_fitter["training_contract"]["training_state"] != "NOT_STARTED":
+        raise AssertionError("forecast fitter specification initiated training")
+    if forecast_fitter["execution_state"] != "NOT_ENABLED":
+        raise AssertionError("forecast fitter specification enabled execution")
+    if forecast_fitter_view["retroactive_effect_state"] != "NONE":
+        raise AssertionError("forecast fitter specification rewrote historical validity")
+    if validity["target_fitter_id"] is not None:
+        raise AssertionError("forecast validity gate invented a target fitter")
+    if validity["validity_update_state"] != "NOT_APPLIED":
+        raise AssertionError("forecast validity gate applied an unsupported update")
+    if validity["learning_state"] != "NOT_STARTED":
+        raise AssertionError("forecast validity gate initiated learning")
+    if validity["execution_receipt"]["network_access"]:
+        raise AssertionError("forecast validity gate acquired network access")
     try:
         build_residual_snapshot(
             projection,
@@ -488,6 +602,18 @@ def main() -> None:
         raise AssertionError("workbench promoted one residual to empirical validity")
     if workbench_residual["learning_state"] != "NOT_STARTED":
         raise AssertionError("workbench promoted descriptive arithmetic to learning")
+    workbench_validity = workbench["selected_asset"]["readback"]["latest_validity_assessment"]
+    if workbench_validity["decision_state"] != "ABSTAINED":
+        raise AssertionError("workbench suppressed validity-update abstention")
+    if workbench_validity["target_fitter_id"] is not None:
+        raise AssertionError("workbench exposed an invented target fitter")
+    if workbench_validity["validity_update_state"] != "NOT_APPLIED":
+        raise AssertionError("workbench promoted the validity assessment to an update")
+    workbench_fitter = workbench["selected_asset"]["forecasting"]["latest_fitter_specification"]
+    if workbench_fitter["training_state"] != "NOT_STARTED":
+        raise AssertionError("workbench promoted fitter specification to training")
+    if workbench_fitter["retroactive_application_state"] != "PROHIBITED":
+        raise AssertionError("workbench permitted retroactive fitter application")
     readback_workbench = build_workbench_snapshot(
         residual_projection, "11111111-1111-4111-8111-111111111111"
     )
@@ -516,7 +642,7 @@ def main() -> None:
     print(
         f"PASS schemas=1 positive_events={len(events)} "
         f"residual_fixture_events={len(residual_events)} "
-        f"negative_contract_vectors=21 negative_semantic_vectors=23 "
+        f"negative_contract_vectors=27 negative_semantic_vectors=27 "
         f"tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
         f"resolution_candidates={len(projection.resolution_candidates)} "
@@ -533,6 +659,8 @@ def main() -> None:
         f"readback_selection_plans={len(projection.readback_selection_plans)} "
         f"readback_selection_runs={len(projection.readback_selection_runs)} "
         f"forecast_residuals={len(projection.forecast_residuals)} "
+        f"forecast_validity_assessments={len(projection.forecast_validity_assessments)} "
+        f"forecast_fitter_specifications={len(projection.forecast_fitter_specifications)} "
         f"residual_readbacks={len(projection.residual_readbacks)} "
         "workbench_contracts=1 negative_workbench_vectors=2"
     )

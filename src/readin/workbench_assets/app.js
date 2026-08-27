@@ -351,8 +351,10 @@ function renderReadback(asset) {
   const item = asset.readback.latest;
   const selection = asset.readback.latest_selection;
   const residual = asset.readback.latest_forecast_residual;
+  const validity = asset.readback.latest_validity_assessment;
   const design = asset.forecasting.latest_evaluation_design;
   const baseline = asset.forecasting.latest_baseline;
+  const fitterSpecification = asset.forecasting.latest_fitter_specification;
   if (!item && !selection && !design) return emptyState();
   const baselineRow = baseline
     ? `<ul class="record-list"><li class="record-row">
@@ -369,7 +371,7 @@ function renderReadback(asset) {
           ${stateTag(design.fitter_selection_state)}
           ${stateTag(design.prediction_state)}
         </div>
-        <p>${baseline ? residual ? "A user-declared constant baseline was frozen before forecast origin. One descriptive residual has been computed against the uniquely selected readback, but calibration and empirical validity remain unestablished." : "A user-declared constant baseline was frozen before forecast origin. It used no training observations and remains uncalibrated and empirically unvalidated; residual scoring is still disabled." : `${escapeHtml(design.metric_name)} was recorded before the forecast origin using a ledger-recorded training cutoff. Post-cutoff input is excluded. The target and metric remain user-declared and unvalidated; no forecast-capable fitter is registered.`}</p>
+        <p>${baseline ? residual ? validity ? "A user-declared constant baseline was compared with one unique readback. The validity-update gate explicitly abstained because the evidence remains insufficient." : "A user-declared constant baseline was frozen before forecast origin. One descriptive residual has been computed against the uniquely selected readback, but calibration and empirical validity remain unestablished." : "A user-declared constant baseline was frozen before forecast origin. It used no training observations and remains uncalibrated and empirically unvalidated; residual scoring is still disabled." : `${escapeHtml(design.metric_name)} was recorded before the forecast origin using a ledger-recorded training cutoff. Post-cutoff input is excluded. The target and metric remain user-declared and unvalidated; no forecast-capable fitter is registered.`}</p>
       </div>
       <ul class="record-list"><li class="record-row">
         <div class="record-primary">${escapeHtml(titleCase(design.observation_type))}<small>${escapeHtml(design.target_semantics)}</small></div>
@@ -424,6 +426,63 @@ function renderReadback(asset) {
           ${stateTag(residual.residual_state)}
         </li></ul>`
       : "";
+    const validityGate = validity
+      ? `<div class="collection-boundary">
+          <div><span>Assessment decision</span><strong>${escapeHtml(validity.decision_state)}</strong></div>
+          <div class="collection-boundary-states">
+            ${stateTag(validity.eligibility_state)}
+            ${stateTag(validity.target_fitter_state)}
+            ${stateTag(validity.validity_update_state)}
+          </div>
+          <p>The descriptive residual was considered for a validity update and rejected by the bounded reference gate. Insufficient warrant is not evidence of model validity or invalidity.</p>
+        </div>
+        <ul class="record-list">${validity.blockers
+          .map(
+            (blocker) => `<li class="record-row">
+              <div class="record-primary">${escapeHtml(titleCase(blocker))}</div>
+              <div class="record-secondary">Update blocker retained</div>
+              ${stateTag("BLOCKING")}
+            </li>`,
+          )
+          .join("")}</ul>`
+      : "";
+    const specificationGate = fitterSpecification
+      ? `<div class="collection-boundary">
+          <div><span>Prospective model family</span><strong>${escapeHtml(titleCase(fitterSpecification.model_family))}</strong></div>
+          <div class="collection-boundary-states">
+            ${stateTag(fitterSpecification.registration_state)}
+            ${stateTag(fitterSpecification.capability_state)}
+            ${stateTag(fitterSpecification.execution_state)}
+          </div>
+          <p>This specification was registered after the historical validity assessment. It is future-only and cannot remove or rewrite that assessment's no-fitter blocker.</p>
+        </div>
+        <ul class="record-list">
+          <li class="record-row">
+            <div class="record-primary">${escapeHtml(titleCase(fitterSpecification.target_observation_type))}<small>${escapeHtml(fitterSpecification.target_structured_field_path.map(titleCase).join(" → "))} · ${escapeHtml(fitterSpecification.target_unit)}</small></div>
+            <div class="record-secondary">Target contract<small>Point prediction and uncertainty outputs remain required but unimplemented</small></div>
+            ${stateTag(fitterSpecification.prediction_state)}
+          </li>
+          ${fitterSpecification.feature_contracts
+            .map(
+              (feature) => `<li class="record-row">
+                <div class="record-primary">${escapeHtml(titleCase(feature.name))}<small>${escapeHtml(titleCase(feature.observation_type))}</small></div>
+                <div class="record-secondary">Pre-origin numeric feature<small>${escapeHtml(feature.structured_field_path.map(titleCase).join(" → "))} · ${escapeHtml(feature.unit)}</small></div>
+                ${stateTag(feature.temporal_role)}
+              </li>`,
+            )
+            .join("")}
+          <li class="record-row">
+            <div class="record-primary">Training prerequisites<small>${escapeHtml(fitterSpecification.objective)} · data ${escapeHtml(fitterSpecification.training_data_state)}</small></div>
+            <div class="record-secondary">Temporal split and negative controls remain unbound<small>${escapeHtml(fitterSpecification.temporal_split_state)} · ${escapeHtml(fitterSpecification.negative_controls_state)}</small></div>
+            ${stateTag(fitterSpecification.training_state)}
+          </li>
+          <li class="record-row">
+            <div class="record-primary">Historical applicability<small>Prior assessment effect ${escapeHtml(fitterSpecification.prior_assessment_effect)}</small></div>
+            <div class="record-secondary">Future forecasts only<small>No design selection, implementation, or validation corpus</small></div>
+            ${stateTag(fitterSpecification.retroactive_application_state)}
+          </li>
+        </ul>`
+      : "";
     const boundary = residual ?? selection;
     const updates = `<ul class="record-list">
       <li class="record-row"><div class="record-primary">Residual</div><div class="record-secondary">${residual ? "Descriptive arithmetic only" : "Selection is not scoring"}</div>${stateTag(boundary.residual_state)}</li>
@@ -436,6 +495,8 @@ function renderReadback(asset) {
       ${sectionCard("Predeclared readback aperture", selection.name, aperture, true)}
       ${sectionCard("Exactly-one selection", selection.selection_state, selectionResult, true)}
       ${residual ? sectionCard("Descriptive reference residual", residual.residual_scoring_state, residualResult, true) : ""}
+      ${validity ? sectionCard("Validity update gate", validity.decision_state, validityGate, true) : ""}
+      ${fitterSpecification ? sectionCard("Prospective fitter specification", fitterSpecification.registration_state, specificationGate, true) : ""}
       ${sectionCard("Validity and learning boundary", boundary.learning_state, updates, true)}
     </div>`;
   }

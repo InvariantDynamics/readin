@@ -1,4 +1,4 @@
-"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 8E ledger."""
+"""Fail-closed deterministic replay for the READIN Phase 0 through Phase 8G ledger."""
 
 from __future__ import annotations
 
@@ -35,6 +35,13 @@ from readin.forecast_residuals import (
     build_forecast_residual_snapshot,
     compute_forecast_residual_components,
     forecast_residual_implementation_sha256,
+)
+from readin.forecast_validity import (
+    FORECAST_VALIDITY_ALGORITHM_ID,
+    ForecastValidityError,
+    build_forecast_validity_snapshot,
+    compute_forecast_validity_components,
+    forecast_validity_implementation_sha256,
 )
 from readin.forecasting import (
     FORECAST_BASELINE_ALGORITHM_ID,
@@ -109,6 +116,9 @@ class ReadinProjection:
         self.readback_selection_receipts: dict[str, dict[str, Any]] = {}
         self.forecast_residuals: dict[str, dict[str, Any]] = {}
         self.forecast_residual_receipts: dict[str, dict[str, Any]] = {}
+        self.forecast_validity_assessments: dict[str, dict[str, Any]] = {}
+        self.forecast_validity_receipts: dict[str, dict[str, Any]] = {}
+        self.forecast_fitter_specifications: dict[str, dict[str, Any]] = {}
         self.residual_readbacks: dict[str, dict[str, Any]] = {}
         self.residual_receipts: dict[str, dict[str, Any]] = {}
         self.asset_versions: dict[str, list[dict[str, Any]]] = {}
@@ -134,6 +144,7 @@ class ReadinProjection:
         self._baseline_readback_selection_plan: dict[str, str] = {}
         self._plan_readback_selection_run: dict[str, str] = {}
         self._selection_run_forecast_residual: dict[str, str] = {}
+        self._residual_forecast_validity_assessment: dict[str, str] = {}
         self._scenario_readback: dict[str, str] = {}
         self._events: list[dict[str, Any]] = []
 
@@ -1358,6 +1369,108 @@ class ReadinProjection:
         self._selection_run_forecast_residual[selection_run_id] = result_id
         self._advance_asset(asset_id, event)
 
+    def _apply_forecast_validity_update_assessed(self, event: dict[str, Any]) -> None:
+        assessment = deepcopy(event["payload"]["forecast_validity_assessment"])
+        assessment_id = assessment["id"]
+        receipt = assessment["execution_receipt"]
+        receipt_id = receipt["id"]
+        if assessment_id in self.forecast_validity_assessments:
+            raise ProjectionError(f"duplicate forecast validity assessment id: {assessment_id}")
+        if receipt_id in self.forecast_validity_receipts:
+            raise ProjectionError(f"duplicate forecast validity receipt id: {receipt_id}")
+        residual_id = assessment["forecast_residual_id"]
+        if residual_id not in self.forecast_residuals:
+            raise ProjectionError(
+                f"forecast validity assessment references unknown residual: {residual_id}"
+            )
+        if residual_id in self._residual_forecast_validity_assessment:
+            raise ProjectionError("forecast residual already has a validity assessment")
+        residual = self.forecast_residuals[residual_id]
+        identity_fields = {
+            "asset_entity_id": residual["asset_entity_id"],
+            "readback_selection_run_id": residual["readback_selection_run_id"],
+            "forecast_baseline_id": residual["forecast_baseline_id"],
+            "forecast_evaluation_design_id": residual["forecast_evaluation_design_id"],
+            "scenario_id": residual["scenario_id"],
+        }
+        if any(assessment[key] != expected for key, expected in identity_fields.items()):
+            raise ProjectionError("forecast validity assessment identity mismatch")
+        if receipt["forecast_validity_assessment_id"] != assessment_id:
+            raise ProjectionError("forecast validity receipt identity mismatch")
+        if receipt["forecast_residual_id"] != residual_id:
+            raise ProjectionError("forecast validity receipt residual mismatch")
+        if any(receipt[key] != expected for key, expected in identity_fields.items()):
+            raise ProjectionError("forecast validity receipt input identity mismatch")
+        asset_id = residual["asset_entity_id"]
+        if receipt["asset_state_version"] != self.assets[asset_id]["epistemic_state_version"]:
+            raise ProjectionError("forecast validity asset state version mismatch")
+        if not (assessment["recorded_at"] == receipt["executed_at"] == event["occurred_at"]):
+            raise ProjectionError("forecast validity times must match ledger-recorded time")
+        if self._parse_timestamp(assessment["recorded_at"]) < self._parse_timestamp(
+            residual["recorded_at"]
+        ):
+            raise ProjectionError("forecast validity assessment precedes residual")
+
+        try:
+            snapshot = build_forecast_validity_snapshot(self, residual_id)
+            components = compute_forecast_validity_components(snapshot)
+        except ForecastValidityError as error:
+            raise ProjectionError(str(error)) from error
+        expected_receipt_fields = {
+            "forecast_residual_sha256": canonical_sha256(residual),
+            "readback_selection_run_sha256": canonical_sha256(snapshot["readback_selection_run"]),
+            "forecast_baseline_sha256": canonical_sha256(snapshot["forecast_baseline"]),
+            "forecast_evaluation_design_sha256": canonical_sha256(
+                snapshot["forecast_evaluation_design"]
+            ),
+            "scenario_sha256": canonical_sha256(snapshot["scenario"]),
+            "input_snapshot_sha256": canonical_sha256(snapshot),
+            "algorithm_id": FORECAST_VALIDITY_ALGORITHM_ID,
+            "implementation_sha256": forecast_validity_implementation_sha256(),
+            "outcome_sha256": canonical_sha256(components),
+        }
+        mismatched = [
+            key for key, expected in expected_receipt_fields.items() if receipt[key] != expected
+        ]
+        if mismatched:
+            raise ProjectionError(f"forecast validity receipt binding mismatch: {mismatched}")
+        for key, expected in components.items():
+            if assessment[key] != expected:
+                raise ProjectionError(f"forecast validity {key} does not match reference gate")
+
+        self.forecast_validity_assessments[assessment_id] = assessment
+        self.forecast_validity_receipts[receipt_id] = receipt
+        self._residual_forecast_validity_assessment[residual_id] = assessment_id
+        self._advance_asset(asset_id, event)
+
+    def _apply_forecast_fitter_specification_registered(self, event: dict[str, Any]) -> None:
+        specification = deepcopy(event["payload"]["forecast_fitter_specification"])
+        specification_id = specification["id"]
+        if specification_id in self.forecast_fitter_specifications:
+            raise ProjectionError(f"duplicate forecast fitter specification id: {specification_id}")
+        asset_id = specification["asset_entity_id"]
+        if asset_id not in self.assets:
+            raise ProjectionError(
+                f"forecast fitter specification references untracked asset: {asset_id}"
+            )
+        if (
+            specification["initial_state_version"]
+            != self.assets[asset_id]["epistemic_state_version"]
+        ):
+            raise ProjectionError("forecast fitter specification initial state version mismatch")
+        if specification["registered_at"] != event["occurred_at"]:
+            raise ProjectionError(
+                "forecast fitter specification time must match ledger-recorded time"
+            )
+        feature_names = [item["name"] for item in specification["feature_contracts"]]
+        if feature_names != sorted(feature_names):
+            raise ProjectionError("forecast fitter feature contracts must use sorted name order")
+        if len(feature_names) != len(set(feature_names)):
+            raise ProjectionError("forecast fitter feature names must be unique")
+
+        self.forecast_fitter_specifications[specification_id] = specification
+        self._advance_asset(asset_id, event)
+
     def _apply_forecast_evaluation_design_created(self, event: dict[str, Any]) -> None:
         design = deepcopy(event["payload"]["forecast_evaluation_design"])
         design_id = design["id"]
@@ -1846,6 +1959,28 @@ class ReadinProjection:
                 item["forecast_residual"]["id"],
             )
         )
+        forecast_validity_assessments = [
+            self.forecast_validity_assessment_view(assessment_id)
+            for assessment_id, assessment in self.forecast_validity_assessments.items()
+            if assessment["asset_entity_id"] == entity_id
+        ]
+        forecast_validity_assessments.sort(
+            key=lambda item: (
+                item["forecast_validity_assessment"]["recorded_at"],
+                item["forecast_validity_assessment"]["id"],
+            )
+        )
+        forecast_fitter_specifications = [
+            self.forecast_fitter_specification_view(specification_id)
+            for specification_id, specification in self.forecast_fitter_specifications.items()
+            if specification["asset_entity_id"] == entity_id
+        ]
+        forecast_fitter_specifications.sort(
+            key=lambda item: (
+                item["specification"]["registered_at"],
+                item["specification"]["id"],
+            )
+        )
         residual_readbacks = [
             self.residual_readback_view(readback_id)
             for readback_id, readback in self.residual_readbacks.items()
@@ -1889,6 +2024,8 @@ class ReadinProjection:
             "forecast_baselines": forecast_baselines,
             "readback_selection_plans": readback_selection_plans,
             "forecast_residuals": forecast_residuals,
+            "forecast_validity_assessments": forecast_validity_assessments,
+            "forecast_fitter_specifications": forecast_fitter_specifications,
             "residual_readbacks": residual_readbacks,
             "evidence_dependencies": dependencies,
             "observer_frames": [deepcopy(self.frames[item]) for item in frame_ids],
@@ -2496,6 +2633,53 @@ class ReadinProjection:
             "authority_state": "NO_AUTHORITY",
         }
 
+    def forecast_validity_assessment_view(
+        self, forecast_validity_assessment_id: str
+    ) -> dict[str, Any]:
+        if forecast_validity_assessment_id not in self.forecast_validity_assessments:
+            raise ProjectionError(
+                f"unknown forecast validity assessment: {forecast_validity_assessment_id}"
+            )
+        assessment = deepcopy(self.forecast_validity_assessments[forecast_validity_assessment_id])
+        residual = deepcopy(self.forecast_residuals[assessment["forecast_residual_id"]])
+        return {
+            "forecast_validity_assessment": assessment,
+            "forecast_residual": residual,
+            "readback_selection_run": deepcopy(
+                self.readback_selection_runs[assessment["readback_selection_run_id"]]
+            ),
+            "forecast_baseline": deepcopy(
+                self.forecast_baselines[assessment["forecast_baseline_id"]]
+            ),
+            "forecast_evaluation_design": deepcopy(
+                self.forecast_evaluation_designs[assessment["forecast_evaluation_design_id"]]
+            ),
+            "scenario": deepcopy(self.scenarios[assessment["scenario_id"]]),
+            "validity_update_state": "NOT_APPLIED",
+            "learning_state": "NOT_STARTED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
+    def forecast_fitter_specification_view(self, specification_id: str) -> dict[str, Any]:
+        if specification_id not in self.forecast_fitter_specifications:
+            raise ProjectionError(f"unknown forecast fitter specification: {specification_id}")
+        specification = deepcopy(self.forecast_fitter_specifications[specification_id])
+        earlier_assessment_ids = sorted(
+            assessment["id"]
+            for assessment in self.forecast_validity_assessments.values()
+            if assessment["asset_entity_id"] == specification["asset_entity_id"]
+            and self._parse_timestamp(assessment["recorded_at"])
+            <= self._parse_timestamp(specification["registered_at"])
+        )
+        return {
+            "specification": specification,
+            "earlier_validity_assessment_ids": earlier_assessment_ids,
+            "retroactive_effect_state": "NONE",
+            "training_state": "NOT_STARTED",
+            "execution_state": "NOT_ENABLED",
+            "authority_state": "NO_AUTHORITY",
+        }
+
     def resolution_candidate_view(self, candidate_id: str) -> dict[str, Any]:
         if candidate_id not in self.resolution_candidates:
             raise ProjectionError(f"unknown resolution candidate: {candidate_id}")
@@ -2698,6 +2882,10 @@ class ReadinProjection:
             return {payload["readback_selection_run"]["asset_entity_id"]}
         if event_type == "forecast.residual_computed":
             return {payload["forecast_residual"]["asset_entity_id"]}
+        if event_type == "forecast.validity_update_assessed":
+            return {payload["forecast_validity_assessment"]["asset_entity_id"]}
+        if event_type == "forecast.fitter_specification_registered":
+            return {payload["forecast_fitter_specification"]["asset_entity_id"]}
         if event_type == "residual.readback_completed":
             return {payload["residual_readback"]["asset_entity_id"]}
         if event_type == "evidence.linked":
@@ -2760,6 +2948,10 @@ class ReadinProjection:
             return event["payload"]["readback_selection_run"]["recorded_at"]
         if event_type == "forecast.residual_computed":
             return event["payload"]["forecast_residual"]["recorded_at"]
+        if event_type == "forecast.validity_update_assessed":
+            return event["payload"]["forecast_validity_assessment"]["recorded_at"]
+        if event_type == "forecast.fitter_specification_registered":
+            return event["payload"]["forecast_fitter_specification"]["registered_at"]
         if event_type == "residual.readback_completed":
             return event["payload"]["residual_readback"]["recorded_at"]
         return event["occurred_at"]
@@ -2838,6 +3030,14 @@ class ReadinProjection:
                 "forecast_residual_count": sum(
                     entity_id == result["asset_entity_id"]
                     for result in self.forecast_residuals.values()
+                ),
+                "forecast_validity_assessment_count": sum(
+                    entity_id == assessment["asset_entity_id"]
+                    for assessment in self.forecast_validity_assessments.values()
+                ),
+                "forecast_fitter_specification_count": sum(
+                    entity_id == specification["asset_entity_id"]
+                    for specification in self.forecast_fitter_specifications.values()
                 ),
                 "residual_readback_count": sum(
                     entity_id == readback["asset_entity_id"]

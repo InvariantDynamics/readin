@@ -31,7 +31,8 @@ contracts and receipts; it does not redefine OFS Core.
 
 The current foundation, bounded Array, resolution, cartography, multi-fitter, belief, scenario,
 asset-workbench, discriminating-observation, forecast-evaluation design, frozen-baseline,
-readback-selection, descriptive-reference-residual, and residual-readback eligibility slices
+readback-selection, descriptive-reference-residual, validity-update eligibility, and
+prospective forecast-fitter specification and residual-readback eligibility slices
 implement one local epistemic loop:
 
 1. Create a typed entity and start tracking it as an asset.
@@ -88,7 +89,12 @@ implement one local epistemic loop:
 36. Only for a unique selection, compute signed residual as observed minus predicted and absolute
     error against the frozen constant, while leaving unit equivalence, uncertainty, calibration,
     empirical validity, validity updates, weighting, future admissibility, and learning unopened.
-37. In the separate no-baseline branch, bind a later observation to the earlier scenario run and
+37. Assess whether that descriptive residual can support a validity update, retain all six blocking
+    conditions, and abstain without selecting a fitter or applying any update.
+38. Register a future-only linear-regression fitter specification with typed target, feature,
+    temporal, control, and output requirements, while leaving implementation, training, selection,
+    execution, prediction, and validation unopened.
+39. In the separate no-baseline branch, bind a later observation to the earlier scenario run and
     retain the existing ineligible-baseline abstention.
 
 This slice uses manual, synthetic input only. Cartographic, fitter, belief, and scenario execution is
@@ -114,8 +120,15 @@ selection boundary. Phase 8E separately records one
 value `1.0`, signed residual `0.25`, and absolute error `0.25` in the synthetic fixture. The unit
 binding remains user-declared and unverified, uncertainty is not estimated from one readback,
 calibration and empirical validity remain unestablished, and no validity, weighting,
-future-admissibility, or learning update follows. Bayesian and belief outputs are explicitly
-diagnostic rather than truth probabilities.
+future-admissibility, or learning update follows. Phase 8F makes that boundary executable: it binds
+the residual to a replay-verifiable eligibility receipt and records
+`INELIGIBLE_VALIDITY_UPDATE` / `ABSTAINED` because no forecast fitter, trained model, validation
+corpus, verified unit equivalence, multi-sample evidence, or uncertainty estimate exists. It does
+not select a fitter or establish model invalidity. Bayesian and belief outputs are explicitly
+diagnostic rather than truth probabilities. Phase 8G then records one prospective
+`LINEAR_REGRESSION` specification. It is registered after the historical assessment and cannot
+rewrite it. No training data, temporal split, negative controls, implementation, design selection,
+execution, prediction, validation corpus, uncertainty estimate, or model-validity result exists.
 Scenario branches are
 user-defined conditional structures: likelihood is `NOT_COMPUTED`, trajectories are
 `NOT_SIMULATED`, and the unknown/unmodeled region remains visible. Phase 7 ranking is an ordinal
@@ -138,7 +151,7 @@ make demo
 make workbench
 ```
 
-`make workbench` creates the closed synthetic Phase 8E ledger in a temporary directory and serves
+`make workbench` creates the closed synthetic Phase 8G ledger in a temporary directory and serves
 the bounded workbench at `http://127.0.0.1:4173`. It takes no external action and removes the
 temporary ledger when stopped.
 
@@ -200,6 +213,21 @@ uv run readin run-forecast-residual --ledger .readin/events.jsonl \
   --occurred-at <ISO-8601-time-at-or-after-selection>
 uv run readin show-forecast-residual --ledger .readin/events.jsonl \
   --residual <forecast-residual-id>
+# Phase 8F fail-closed validity-update eligibility gate:
+uv run readin assess-forecast-validity-update --ledger .readin/events.jsonl \
+  --residual <forecast-residual-id> \
+  --occurred-at <ISO-8601-time-at-or-after-residual>
+uv run readin show-forecast-validity-assessment --ledger .readin/events.jsonl \
+  --assessment <forecast-validity-assessment-id>
+# Phase 8G prospective-only fitter specification:
+uv run readin register-forecast-fitter-specification --ledger .readin/events.jsonl \
+  --asset <entity-id> --name "Linear forecast candidate" \
+  --model-family LINEAR_REGRESSION \
+  --target-observation-type <observation-type> --target-field <numeric-field> \
+  --target-unit <unit> \
+  --feature-json '{"name":"prior_value","observation_type":"<observation-type>","structured_field_path":["<numeric-field>"],"unit":"<unit>"}'
+uv run readin show-forecast-fitter-specification --ledger .readin/events.jsonl \
+  --specification <forecast-fitter-specification-id>
 # Phase 8A no-baseline branch only; omit run-forecast-baseline:
 uv run readin run-residual-readback --ledger .readin/events.jsonl \
   --scenario-run <scenario-run-id> --observation <later-observation-id>

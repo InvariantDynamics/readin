@@ -20,7 +20,8 @@ The current implementation opens the entity, tracking, frame, evidence-manifest,
 dependency, claim, evidence-link, relation, historical reconstruction, and reversible candidate
 resolution layers, plus bounded cartographic, multi-fitter, belief, scenario,
 discriminating-observation, forecast-evaluation design, frozen-baseline, readback-selection, and
-descriptive-reference-residual and residual-readback eligibility layers.
+descriptive-reference-residual, validity-update eligibility, and residual-readback eligibility
+layers, plus prospective forecast-fitter specification registration.
 These layers remain separate:
 an observation is never silently promoted into a claim or belief, linked evidence
 never resolves a claim by itself, a selected surface never becomes a completeness claim, a fitter
@@ -39,7 +40,7 @@ validation or a validity update without a separately opened evidence and update 
 
 ## Current event model
 
-The ledger supports twenty-eight events:
+The ledger supports thirty events:
 
 - `entity.created`
 - `asset.tracking_started`
@@ -68,6 +69,8 @@ The ledger supports twenty-eight events:
 - `forecast.readback_selection_plan_created`
 - `forecast.readback_selection_completed`
 - `forecast.residual_computed`
+- `forecast.validity_update_assessed`
+- `forecast.fitter_specification_registered`
 - `residual.readback_completed`
 
 Every event is append-only, schema-validated, timestamped, uniquely identified, and marked
@@ -126,6 +129,10 @@ later observation.admitted + admission cutoff
                   --> exactly one selected or explicit abstention
                   --> forecast.residual_computed
                   --> descriptive arithmetic only; no validity or learning update
+                  --> forecast.validity_update_assessed
+                  --> explicit abstention; six blockers retained and no update applied
+                  --> forecast.fitter_specification_registered
+                  --> future-only specification; no training, execution, or retroactive effect
 ```
 
 Candidate resolution is a sidecar to entity identity, not an entity mutation. A candidate records
@@ -244,7 +251,7 @@ implementation, and outcome digest. Network access is false, collection remains 
 acquisition remains `NOT_ATTEMPTED`, source independence remains `NOT_ESTABLISHED`, and every result
 retains `NO_AUTHORITY`.
 
-## Bounded forecast design, frozen baseline, readback selection, and residual eligibility
+## Bounded forecast design, residual, validity eligibility, and prospective fitter specification
 
 Phase 8A implements the prerequisite gate for the architecture roadmap's residual loop. A readback
 binds one completed scenario run to one or more already-admitted observations concerning the same
@@ -303,6 +310,28 @@ remain `NOT_ESTABLISHED`; validity, weighting, and future-admissibility updates 
 `NO_AUTHORITY`. The number is a descriptive error for an uncalibrated reference constant, not a
 forecast-skill estimate or model-validity claim.
 
+Phase 8F adds a separate eligibility assessment after that residual. The runtime binds the residual,
+readback selection, frozen baseline, evaluation design, scenario, asset state, reference
+implementation, and outcome to a replay-verifiable receipt. It records exactly six blockers:
+`NO_REGISTERED_FORECAST_FITTER`, `REFERENCE_BASELINE_NOT_TRAINED_MODEL`, `SINGLE_READBACK_ONLY`,
+`UNIT_EQUIVALENCE_NOT_VERIFIED`, `NO_PREDECLARED_VALIDATION_CORPUS`, and
+`UNCERTAINTY_NOT_ESTIMATED`. The resulting eligibility and decision are fixed to
+`INELIGIBLE_VALIDITY_UPDATE` and `ABSTAINED`; `target_fitter_id` is null, and validity, weighting,
+future-admissibility, and learning updates remain off. Replay rejects identity drift, receipt or
+outcome tampering, an unsupported residual boundary, or a second assessment for the same residual.
+This gate makes the stop condition inspectable; it does not establish model invalidity, forecast
+validation, or authority.
+
+Phase 8G registers one typed forecast-fitter specification after the historical assessment. The
+specification declares a numeric target, one or more numeric pre-origin features, a linear-regression
+model family, a squared-error objective, ledger-recorded temporal leakage basis, required temporal
+split and negative controls, exact unit binding, and required point-prediction and uncertainty
+outputs. These are contracts, not implemented capabilities. Training data remains `NOT_SELECTED`,
+implementation `NOT_PROVIDED`, training `NOT_STARTED`, selection `NOT_SELECTED`, execution
+`NOT_ENABLED`, prediction `NOT_PRODUCED`, validation corpus `NOT_PREDECLARED`, and empirical
+validity `NOT_ESTABLISHED`. Applicability is `FUTURE_FORECASTS_ONLY`; retroactive application is
+`PROHIBITED`, so the Phase 8F assessment and its no-fitter blocker remain historically unchanged.
+
 Later readback observations must match the predeclared observation type and contain a numeric value
 at the declared structured-field path. The receipt binds the complete evaluation design. These
 checks establish target compatibility and temporal order only; they do not establish that any
@@ -326,8 +355,11 @@ These slices do not satisfy the full Phase 8 exit condition. No trained or calib
 forecast-capable fitter, validation corpus, uncertainty estimate, validity update, weighting update,
 admissibility update, or empirical learning exists. The only computed residual is one descriptive
 comparison against an uncalibrated user-declared constant. The workbench Readback tab presents the
-frozen baseline, preregistered selection or abstention, descriptive arithmetic when eligible, or the
-no-baseline state, with no write control, network access, collection, or action authority.
+frozen baseline, preregistered selection or abstention, descriptive arithmetic when eligible, the
+validity-update abstention, or the no-baseline state, with no write control, network access,
+collection, or action authority. Phase 8F makes this stop condition executable; it does not open an
+update path. Phase 8G adds only a prospective fitter specification; no implementation, training,
+future-design selection, forecast execution, or model evidence is present.
 
 Claims are created with `epistemic_status: unresolved`. An evidence link records role or polarity,
 dependency group, warrant, appraisal, and strength as separate axes. Strength is `UNASSESSED` until
@@ -389,8 +421,10 @@ artifact storage and live acquisition are later gated work.
    update fitter validity or weighting only when supported. *(Phase 8A readback eligibility and
    Phase 8B evaluation-design prerequisites, Phase 8C frozen constant baseline, Phase 8D
    preregistered exactly-one readback selection, and Phase 8E one-sample descriptive reference
-   residual implemented; trained or calibrated forecast models, validation-corpus scoring,
-   uncertainty estimation, and updates not implemented)*
+   residual, plus Phase 8F replay-verifiable validity-update abstention implemented; trained or
+   calibrated forecast models are not implemented. Phase 8G prospective fitter specification is
+   also implemented, while training, future-design selection, validation-corpus scoring,
+   uncertainty estimation, and updates remain unimplemented.)*
 
 Each slice requires its own contract, positive and negative fixtures, validation path, claim ceiling,
 and stop conditions.

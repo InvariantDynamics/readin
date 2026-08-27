@@ -32,7 +32,9 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
+from readin.forecast_fitters import register_forecast_fitter_specification
 from readin.forecast_residuals import execute_forecast_residual
+from readin.forecast_validity import execute_forecast_validity_assessment
 from readin.forecasting import (
     create_forecast_evaluation_design,
     execute_frozen_forecast_baseline,
@@ -900,6 +902,54 @@ def phase8e_events() -> list[dict[str, Any]]:
             receipt_id="e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e1",
             event_id="e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e2",
             occurred_at="2026-09-23T12:00:02Z",
+        )
+    )
+    return events
+
+
+def phase8f_events() -> list[dict[str, Any]]:
+    """Return one fail-closed validity-update assessment for the reference residual."""
+
+    events = phase8e_events()
+    projection = ReadinProjection.replay(events)
+    events.append(
+        execute_forecast_validity_assessment(
+            projection,
+            "e4e4e4e4-e4e4-44e4-84e4-e4e4e4e4e4e0",
+            assessment_id="f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0",
+            receipt_id="f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1",
+            event_id="f2f2f2f2-f2f2-42f2-82f2-f2f2f2f2f2f2",
+            occurred_at="2026-09-23T12:00:03Z",
+        )
+    )
+    return events
+
+
+def phase8g_events() -> list[dict[str, Any]]:
+    """Return one prospective fitter specification after the historical abstention."""
+
+    events = phase8f_events()
+    projection = ReadinProjection.replay(events)
+    events.append(
+        register_forecast_fitter_specification(
+            projection,
+            "11111111-1111-4111-8111-111111111111",
+            "Synthetic activity linear forecast candidate",
+            "LINEAR_REGRESSION",
+            "independent_record.program_activity_follow_up",
+            ["activity_score"],
+            "synthetic_activity_index",
+            [
+                {
+                    "name": "prior_activity_score",
+                    "observation_type": "independent_record.program_activity_follow_up",
+                    "structured_field_path": ["activity_score"],
+                    "unit": "synthetic_activity_index",
+                }
+            ],
+            specification_id="f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3",
+            event_id="f4f4f4f4-f4f4-44f4-84f4-f4f4f4f4f4f4",
+            occurred_at="2026-09-23T12:00:04Z",
         )
     )
     return events

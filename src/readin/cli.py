@@ -1,4 +1,4 @@
-"""Command-line interface for the local READIN Phase 0 through Phase 8E runtime."""
+"""Command-line interface for the local READIN Phase 0 through Phase 8G runtime."""
 
 from __future__ import annotations
 
@@ -38,7 +38,16 @@ from readin.fitters import (
     create_reference_fitter_registration,
     execute_reference_fitter_group,
 )
+from readin.forecast_fitters import (
+    FORECAST_FITTER_MODEL_FAMILIES,
+    ForecastFitterSpecificationError,
+    register_forecast_fitter_specification,
+)
 from readin.forecast_residuals import ForecastResidualError, execute_forecast_residual
+from readin.forecast_validity import (
+    ForecastValidityError,
+    execute_forecast_validity_assessment,
+)
 from readin.forecasting import (
     ForecastBaselineError,
     ForecastDesignError,
@@ -524,6 +533,39 @@ def _build_parser() -> argparse.ArgumentParser:
     forecast_residual_parser.add_argument("--residual-id")
     forecast_residual_parser.add_argument("--occurred-at")
 
+    forecast_validity_parser = subparsers.add_parser(
+        "assess-forecast-validity-update",
+        help="Assess and abstain from unsupported validity updates",
+    )
+    _add_ledger_argument(forecast_validity_parser)
+    forecast_validity_parser.add_argument("--residual", required=True)
+    forecast_validity_parser.add_argument("--assessment-id")
+    forecast_validity_parser.add_argument("--occurred-at")
+
+    forecast_fitter_parser = subparsers.add_parser(
+        "register-forecast-fitter-specification",
+        help="Register a future-only forecast fitter specification without training",
+    )
+    _add_ledger_argument(forecast_fitter_parser)
+    forecast_fitter_parser.add_argument("--asset", required=True)
+    forecast_fitter_parser.add_argument("--name", required=True)
+    forecast_fitter_parser.add_argument(
+        "--model-family",
+        required=True,
+        choices=tuple(sorted(FORECAST_FITTER_MODEL_FAMILIES)),
+    )
+    forecast_fitter_parser.add_argument("--target-observation-type", required=True)
+    forecast_fitter_parser.add_argument("--target-field", required=True, action="append")
+    forecast_fitter_parser.add_argument("--target-unit", required=True)
+    forecast_fitter_parser.add_argument(
+        "--feature-json",
+        required=True,
+        action="append",
+        help=("Numeric feature JSON with name, observation_type, structured_field_path, and unit"),
+    )
+    forecast_fitter_parser.add_argument("--specification-id")
+    forecast_fitter_parser.add_argument("--occurred-at")
+
     residual_parser = subparsers.add_parser(
         "run-residual-readback",
         help="Bind later observations and abstain when no forecast baseline exists",
@@ -665,6 +707,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_ledger_argument(forecast_residual_view_parser)
     forecast_residual_view_parser.add_argument("--residual", required=True)
+
+    forecast_validity_view_parser = subparsers.add_parser(
+        "show-forecast-validity-assessment",
+        help="Inspect one fail-closed forecast validity-update assessment",
+    )
+    _add_ledger_argument(forecast_validity_view_parser)
+    forecast_validity_view_parser.add_argument("--assessment", required=True)
+
+    forecast_fitter_view_parser = subparsers.add_parser(
+        "show-forecast-fitter-specification",
+        help="Inspect one prospective forecast fitter specification",
+    )
+    _add_ledger_argument(forecast_fitter_view_parser)
+    forecast_fitter_view_parser.add_argument("--specification", required=True)
 
     residual_view_parser = subparsers.add_parser(
         "show-residual-readback",
@@ -1086,6 +1142,36 @@ def _run(args: argparse.Namespace) -> Any:
         result_id = event["payload"]["forecast_residual"]["id"]
         return ledger.projection().forecast_residual_view(result_id)
 
+    if args.command == "assess-forecast-validity-update":
+        projection = ledger.projection()
+        event = execute_forecast_validity_assessment(
+            projection,
+            args.residual,
+            assessment_id=args.assessment_id,
+            occurred_at=args.occurred_at,
+        )
+        ledger.append(event)
+        assessment_id = event["payload"]["forecast_validity_assessment"]["id"]
+        return ledger.projection().forecast_validity_assessment_view(assessment_id)
+
+    if args.command == "register-forecast-fitter-specification":
+        projection = ledger.projection()
+        event = register_forecast_fitter_specification(
+            projection,
+            args.asset,
+            args.name,
+            args.model_family,
+            args.target_observation_type,
+            args.target_field,
+            args.target_unit,
+            [_json_object(item) for item in args.feature_json],
+            specification_id=args.specification_id,
+            occurred_at=args.occurred_at,
+        )
+        ledger.append(event)
+        specification_id = event["payload"]["forecast_fitter_specification"]["id"]
+        return ledger.projection().forecast_fitter_specification_view(specification_id)
+
     if args.command == "run-residual-readback":
         projection = ledger.projection()
         event = execute_residual_readback(
@@ -1148,6 +1234,10 @@ def _run(args: argparse.Namespace) -> Any:
         return projection.readback_selection_run_view(args.run)
     if args.command == "show-forecast-residual":
         return projection.forecast_residual_view(args.residual)
+    if args.command == "show-forecast-validity-assessment":
+        return projection.forecast_validity_assessment_view(args.assessment)
+    if args.command == "show-forecast-fitter-specification":
+        return projection.forecast_fitter_specification_view(args.specification)
     if args.command == "show-residual-readback":
         return projection.residual_readback_view(args.readback)
     if args.command == "list-assets":
@@ -1170,7 +1260,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         FitterRuntimeError,
         ForecastBaselineError,
         ForecastDesignError,
+        ForecastFitterSpecificationError,
         ForecastResidualError,
+        ForecastValidityError,
         KeyError,
         LedgerError,
         ProjectionError,

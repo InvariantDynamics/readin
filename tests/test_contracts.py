@@ -18,6 +18,8 @@ from readin.synthetic import (
     phase8c_events,
     phase8d_events,
     phase8e_events,
+    phase8f_events,
+    phase8g_events,
 )
 
 
@@ -320,6 +322,86 @@ def test_phase8e_contract_rejects_validity_unit_and_network_promotion() -> None:
 
     networked = deepcopy(phase8e_events()[46])
     networked["payload"]["forecast_residual"]["execution_receipt"]["network_access"] = True
+    with pytest.raises(ContractViolation, match="False was expected"):
+        validate_event(networked)
+
+
+def test_synthetic_phase8f_validity_gate_conforms_without_updates() -> None:
+    events = phase8f_events()
+    assert len(events) == 48
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    assessment = events[47]["payload"]["forecast_validity_assessment"]
+    assert assessment["eligibility_state"] == "INELIGIBLE_VALIDITY_UPDATE"
+    assert assessment["decision_state"] == "ABSTAINED"
+    assert assessment["target_fitter_id"] is None
+    assert assessment["validity_update_state"] == "NOT_APPLIED"
+    assert assessment["weighting_update_state"] == "NOT_APPLIED"
+    assert assessment["future_admissibility_update_state"] == "NOT_APPLIED"
+    assert assessment["learning_state"] == "NOT_STARTED"
+    assert assessment["execution_receipt"]["network_access"] is False
+
+
+def test_phase8f_contract_rejects_update_fitter_and_authority_promotion() -> None:
+    validity = deepcopy(phase8f_events()[47])
+    validity["payload"]["forecast_validity_assessment"]["validity_update_state"] = "APPLIED"
+    with pytest.raises(ContractViolation, match="NOT_APPLIED"):
+        validate_event(validity)
+
+    fitter = deepcopy(phase8f_events()[47])
+    fitter["payload"]["forecast_validity_assessment"]["target_fitter_id"] = (
+        "55555555-5555-4555-8555-555555555551"
+    )
+    with pytest.raises(ContractViolation, match="is not of type 'null'"):
+        validate_event(fitter)
+
+    networked = deepcopy(phase8f_events()[47])
+    networked["payload"]["forecast_validity_assessment"]["execution_receipt"]["network_access"] = (
+        True
+    )
+    with pytest.raises(ContractViolation, match="False was expected"):
+        validate_event(networked)
+
+
+def test_synthetic_phase8g_forecast_fitter_specification_conforms_without_execution() -> None:
+    events = phase8g_events()
+    assert len(events) == 49
+    for event in events:
+        validate_event(event)
+        assert event["authority_state"] == "NO_AUTHORITY"
+
+    specification = events[48]["payload"]["forecast_fitter_specification"]
+    assert specification["registration_state"] == "REGISTERED_SPECIFICATION_ONLY"
+    assert specification["capability_state"] == "DECLARED_NOT_VERIFIED"
+    assert specification["training_contract"]["training_state"] == "NOT_STARTED"
+    assert specification["implementation_state"] == "NOT_PROVIDED"
+    assert specification["selection_state"] == "NOT_SELECTED"
+    assert specification["execution_state"] == "NOT_ENABLED"
+    assert specification["prediction_state"] == "NOT_PRODUCED"
+    assert specification["validation_corpus_state"] == "NOT_PREDECLARED"
+    assert specification["applicability"]["retroactive_application_state"] == "PROHIBITED"
+    assert specification["network_access"] is False
+
+
+def test_phase8g_contract_rejects_training_retroactivity_and_network_promotion() -> None:
+    trained = deepcopy(phase8g_events()[48])
+    trained["payload"]["forecast_fitter_specification"]["training_contract"]["training_state"] = (
+        "COMPLETED"
+    )
+    with pytest.raises(ContractViolation, match="NOT_STARTED"):
+        validate_event(trained)
+
+    retroactive = deepcopy(phase8g_events()[48])
+    retroactive["payload"]["forecast_fitter_specification"]["applicability"][
+        "retroactive_application_state"
+    ] = "ALLOWED"
+    with pytest.raises(ContractViolation, match="PROHIBITED"):
+        validate_event(retroactive)
+
+    networked = deepcopy(phase8g_events()[48])
+    networked["payload"]["forecast_fitter_specification"]["network_access"] = True
     with pytest.raises(ContractViolation, match="False was expected"):
         validate_event(networked)
 

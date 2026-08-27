@@ -17,6 +17,8 @@ from readin.synthetic import (
     phase8c_events,
     phase8d_events,
     phase8e_events,
+    phase8f_events,
+    phase8g_events,
 )
 from readin.workbench import (
     WorkbenchError,
@@ -203,6 +205,70 @@ def test_workbench_exposes_phase8e_descriptive_residual_without_validity() -> No
     assert residual["future_admissibility_update_state"] == "NOT_APPLIED"
     assert residual["learning_state"] == "NOT_STARTED"
     assert residual["network_access"] is False
+
+
+def test_workbench_exposes_phase8f_validity_abstention_and_blockers() -> None:
+    snapshot = build_workbench_snapshot(ReadinProjection.replay(phase8f_events()), ASSET_ID)
+    asset = snapshot["selected_asset"]
+    assessment = asset["readback"]["latest_validity_assessment"]
+
+    assert snapshot["generated_from"]["event_count"] == 48
+    assert snapshot["epistemic_limits"]["empirical_validity_state"] == ("NOT_ESTABLISHED")
+    assert snapshot["epistemic_limits"]["validity_update_state"] == "NOT_APPLIED"
+    assert snapshot["epistemic_limits"]["learning_state"] == "NOT_STARTED"
+    assert asset["counts"]["forecast_validity_assessments"] == 1
+    assert assessment["eligibility_state"] == "INELIGIBLE_VALIDITY_UPDATE"
+    assert assessment["decision_state"] == "ABSTAINED"
+    assert assessment["target_fitter_id"] is None
+    assert assessment["target_fitter_state"] == ("NOT_AVAILABLE_NO_REGISTERED_FORECAST_FITTER")
+    assert assessment["sample_count"] == 1
+    assert assessment["validation_corpus_state"] == "NOT_PREDECLARED"
+    assert assessment["blockers"] == [
+        "NO_REGISTERED_FORECAST_FITTER",
+        "REFERENCE_BASELINE_NOT_TRAINED_MODEL",
+        "SINGLE_READBACK_ONLY",
+        "UNIT_EQUIVALENCE_NOT_VERIFIED",
+        "NO_PREDECLARED_VALIDATION_CORPUS",
+        "UNCERTAINTY_NOT_ESTIMATED",
+    ]
+    assert assessment["calibration_state"] == "NOT_ESTABLISHED"
+    assert assessment["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert assessment["validity_update_state"] == "NOT_APPLIED"
+    assert assessment["weighting_update_state"] == "NOT_APPLIED"
+    assert assessment["future_admissibility_update_state"] == "NOT_APPLIED"
+    assert assessment["learning_state"] == "NOT_STARTED"
+    assert assessment["network_access"] is False
+
+
+def test_workbench_exposes_phase8g_prospective_specification_without_retroactivity() -> None:
+    snapshot = build_workbench_snapshot(ReadinProjection.replay(phase8g_events()), ASSET_ID)
+    asset = snapshot["selected_asset"]
+    specification = asset["forecasting"]["latest_fitter_specification"]
+    assessment = asset["readback"]["latest_validity_assessment"]
+
+    assert snapshot["generated_from"]["event_count"] == 49
+    assert snapshot["epistemic_limits"]["empirical_validity_state"] == "NOT_ESTABLISHED"
+    assert snapshot["epistemic_limits"]["validity_update_state"] == "NOT_APPLIED"
+    assert snapshot["epistemic_limits"]["learning_state"] == "NOT_STARTED"
+    assert asset["counts"]["forecast_fitter_specifications"] == 1
+    assert specification["model_family"] == "LINEAR_REGRESSION"
+    assert specification["registration_state"] == "REGISTERED_SPECIFICATION_ONLY"
+    assert specification["capability_state"] == "DECLARED_NOT_VERIFIED"
+    assert specification["training_data_state"] == "NOT_SELECTED"
+    assert specification["training_state"] == "NOT_STARTED"
+    assert specification["temporal_split_state"] == "REQUIRED_NOT_PREDECLARED"
+    assert specification["negative_controls_state"] == "REQUIRED_NOT_PREDECLARED"
+    assert specification["implementation_state"] == "NOT_PROVIDED"
+    assert specification["selection_state"] == "NOT_SELECTED"
+    assert specification["execution_state"] == "NOT_ENABLED"
+    assert specification["prediction_state"] == "NOT_PRODUCED"
+    assert specification["uncertainty_state"] == "REQUIRED_NOT_IMPLEMENTED"
+    assert specification["validation_corpus_state"] == "NOT_PREDECLARED"
+    assert specification["retroactive_application_state"] == "PROHIBITED"
+    assert specification["prior_assessment_effect"] == "NONE"
+    assert specification["network_access"] is False
+    assert assessment["blockers"][0] == "NO_REGISTERED_FORECAST_FITTER"
+    assert assessment["validity_update_state"] == "NOT_APPLIED"
 
 
 def test_workbench_projection_supports_empty_catalog_and_rejects_unknown_asset() -> None:
