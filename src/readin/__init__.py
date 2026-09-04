@@ -77,6 +77,14 @@ from readin.forecasting import (
     create_forecast_evaluation_design,
     execute_frozen_forecast_baseline,
 )
+from readin.local_source_exports import (
+    LocalSourceExportError,
+    build_local_source_export_events,
+    import_local_source_export,
+    load_local_source_export,
+    load_local_source_export_schema,
+    validate_local_source_export,
+)
 from readin.projection import ProjectionError, ReadinProjection
 from readin.readback_selection import (
     ReadbackSelectionError,
@@ -109,6 +117,12 @@ __all__ = [
     "ForecastValidityError",
     "ReadbackSelectionError",
     "LedgerError",
+    "LocalSourceExportError",
+    "build_local_source_export_events",
+    "import_local_source_export",
+    "load_local_source_export",
+    "load_local_source_export_schema",
+    "validate_local_source_export",
     "ProjectionError",
     "ReadinProjection",
     "ResidualRuntimeError",

@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from readin.connector_grants import CONNECTOR_GRANT_OBSERVATION_TYPE
+from readin.local_source_exports import LOCAL_SOURCE_EXPORT_ADAPTER
 from readin.projection import ProjectionError, ReadinProjection
 from readin.store import EventLedger, LedgerError
 
@@ -175,6 +176,42 @@ def _latest_connector_grant(observations: list[dict[str, Any]]) -> dict[str, Any
         "activation_requirement": grant["activation_requirement"],
         "source_digest_sha256": grant["source_digest_sha256"],
     }
+
+
+def _source_export_summaries(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    batches: dict[str, dict[str, Any]] = {}
+    for observation in observations:
+        if observation["provenance"]["adapter"] != LOCAL_SOURCE_EXPORT_ADAPTER:
+            continue
+        receipt = observation["content"]["structured_payload"].get("source_export")
+        if not isinstance(receipt, dict) or not isinstance(receipt.get("export_id"), str):
+            continue
+        export_id = receipt["export_id"]
+        if export_id not in batches:
+            batches[export_id] = {
+                "export_id": export_id,
+                "grant_id": receipt.get("grant_id"),
+                "source_sha256": receipt.get("source_sha256"),
+                "source_size": receipt.get("source_size"),
+                "expected_observation_count": receipt.get("observation_count"),
+                "observation_count": 0,
+                "observation_ids": [],
+                "observation_types": [],
+                "imported_at": observation["provenance"]["acquisition_time"],
+                "source_artifact_id": observation["source_artifact_id"],
+            }
+        batch = batches[export_id]
+        batch["observation_count"] += 1
+        batch["observation_ids"].append(observation["id"])
+        if observation["observation_type"] not in batch["observation_types"]:
+            batch["observation_types"].append(observation["observation_type"])
+    for batch in batches.values():
+        batch["state"] = (
+            "IMPORTED"
+            if batch["observation_count"] == batch["expected_observation_count"]
+            else "PARTIAL_IMPORT"
+        )
+    return list(batches.values())
 
 
 def _catalog_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -1028,6 +1065,7 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "asset_catalog_binding": deepcopy(asset_catalog_binding),
             "connector_intent": deepcopy(connector_intent),
             "connector_grant": deepcopy(latest_connector_grant),
+            "source_exports": _source_export_summaries(view["observations"]),
             "source_setup": (
                 {
                     "asset_class": asset_catalog_binding["asset_class"],

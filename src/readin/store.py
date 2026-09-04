@@ -68,19 +68,31 @@ class EventLedger:
                 os.close(descriptor)
 
     def append(self, event: dict[str, Any]) -> None:
-        validate_event(event)
+        self.append_batch([event])
+
+    def append_batch(self, batch: list[dict[str, Any]]) -> None:
+        """Validate every event before writing; hold one lock across the entire batch.
+
+        This prevents interleaved writers and partial writes on validation failure.
+        Like append(), it is not a crash-atomic filesystem transaction.
+        """
+        for event in batch:
+            validate_event(event)
 
         with self._open_existing(os.O_RDWR, "r+") as stream:
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
             try:
                 events = self._read_stream(stream)
                 projection = ReadinProjection.replay(events)
-                projection.apply(event)
-                stream.seek(0, os.SEEK_END)
-                stream.write(
+                for event in batch:
+                    projection.apply(event)
+                serialized = "".join(
                     json.dumps(event, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                    + "\n"
+                    for event in batch
                 )
-                stream.write("\n")
+                stream.seek(0, os.SEEK_END)
+                stream.write(serialized)
                 stream.flush()
                 os.fsync(stream.fileno())
             finally:

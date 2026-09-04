@@ -472,6 +472,85 @@ typed and reviewable before any sensor runner is written.
 
 See [ADR 0019](docs/adr/0019-connector-grant-readiness.md) for the connector-grant boundary.
 
+## Import a local profile export (H3)
+
+The first working import path accepts a **prepared JSON profile batch** for one cataloged social
+account. Native provider ZIP and CSV archives are not yet supported. Copy only your platform,
+account identifier, display name, and optional catalog-matched profile URL into this format.
+Provider origin and accuracy remain user-supplied, not independently verified.
+
+First record a **new** grant using the H2 manifest above with these changes:
+
+- Use a new `grant_id` (never reuse an ID with changed content).
+- Set `provider.connector_kind` to `SOCIAL_EXPORT` and give it a local-export connector name.
+- Set `grant.grant_kind` to `LOCAL_EXPORT_ONLY`, `grant.access_mode` to
+  `LOCAL_EXPORT_IMPORT_ONLY`, and `grant.oauth_state` to `NOT_REQUIRED`.
+- Keep `ACCOUNT_PROFILE_METADATA` scope and `social.profile_metadata` as the output.
+- Set `retention.raw_export_retention` to `USER_MANAGED_NOT_RECORDED`.
+
+Store this prepared export as an owner-only file outside Git and cloud-synchronized folders.
+Replace the example IDs with your export ID, recorded local-export grant ID, and catalog entity
+ID. Platform, account identifier, and optional URL must match that catalog asset exactly.
+
+```json
+{
+  "schema_version": "readin.local-source-export.v0.1",
+  "export_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  "grant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "asset_entity_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "prepared_at": "2026-09-04T12:10:00Z",
+  "parser": "GENERIC_JSON_OBSERVATION_BATCH",
+  "handling": {
+    "owner_attestation": "SELF_OR_CONTROLLED_ASSETS_ONLY",
+    "private_counterparty_data": "EXCLUDED",
+    "credential_material": "ABSENT",
+    "network_access": false,
+    "raw_export_retention": "USER_MANAGED_NOT_RECORDED"
+  },
+  "observations": [
+    {
+      "record_key": "profile-1",
+      "observation_type": "social.profile_metadata",
+      "observed_at": "2026-09-04T12:00:00Z",
+      "structured_payload": {
+        "platform": "LinkedIn",
+        "account_identifier": "operator",
+        "display_name": "Example operator",
+        "profile_url": "https://www.linkedin.com/in/operator/"
+      }
+    }
+  ]
+}
+```
+
+Preview, then import using the same paths and grant:
+
+```shell
+uv run readin import-local-source-export \
+  --ledger "/path/outside/git/events.jsonl" \
+  --grant "your-local-export-grant-id" \
+  --source "/path/outside/git/profile-export.json" \
+  --preview
+
+uv run readin import-local-source-export \
+  --ledger "/path/outside/git/events.jsonl" \
+  --grant "your-local-export-grant-id" \
+  --source "/path/outside/git/profile-export.json" \
+  --attest
+
+uv run readin workbench \
+  --ledger "/path/outside/git/events.jsonl" --open-browser
+```
+
+Preview performs all import checks without writing. Admission returns a receipt with source
+SHA-256, record count, and observation IDs. Identical retries return `ALREADY_IMPORTED` without
+duplicating observations. Refresh the workbench: **Setup → Imported source records** shows the
+receipt; **Evidence → Imported profile records** shows the values and evidence identities.
+
+The source stays under your control; READIN does not copy or delete it. Declared retention days
+are not an automated expiration mechanism, and admitted observations remain in the ledger.
+See [ADR 0020](docs/adr/0020-local-source-export-observation-import.md) for the exact contract.
+
 ## Quick start
 
 Install [uv](https://docs.astral.sh/uv/), then:

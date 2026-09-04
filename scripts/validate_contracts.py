@@ -22,6 +22,12 @@ from readin.connector_grants import (
 )
 from readin.contracts import ContractViolation, load_event_schema, validate_event
 from readin.fitters import canonical_sha256
+from readin.local_source_exports import (
+    LocalSourceExportError,
+    build_local_source_export_events,
+    load_local_source_export_schema,
+    validate_local_source_export,
+)
 from readin.projection import ProjectionError, ReadinProjection
 from readin.real_asset_cases import (
     RealAssetPolicyError,
@@ -207,6 +213,7 @@ def main() -> None:
     Draft202012Validator.check_schema(asset_catalog_schema)
     connector_grant_schema = load_connector_grant_source_schema()
     Draft202012Validator.check_schema(connector_grant_schema)
+    Draft202012Validator.check_schema(load_local_source_export_schema())
     asset_catalog_source = _asset_catalog_source()
     validate_asset_catalog_source(asset_catalog_source)
     promoted_catalog = deepcopy(asset_catalog_source)
@@ -273,6 +280,90 @@ def main() -> None:
         for observation in connector_grant_projection.observations.values()
     ):
         raise AssertionError("connector grant did not replay into a grant observation")
+    local_grant = deepcopy(connector_grant_source)
+    local_grant["grant_id"] = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+    local_grant["provider"]["connector_kind"] = "SOCIAL_EXPORT"
+    local_grant["grant"].update(
+        {
+            "grant_kind": "LOCAL_EXPORT_ONLY",
+            "access_mode": "LOCAL_EXPORT_IMPORT_ONLY",
+            "oauth_state": "NOT_REQUIRED",
+        }
+    )
+    local_grant["retention"]["raw_export_retention"] = "USER_MANAGED_NOT_RECORDED"
+    local_grant_events = build_connector_grant_events(
+        local_grant,
+        source_sha256="3" * 64,
+        source_size=2048,
+        asset_binding=asset_binding,
+    )
+    export_projection = ReadinProjection.replay(
+        [
+            *asset_catalog_events,
+            *connector_grant_events,
+            *local_grant_events,
+        ]
+    )
+    export_source = {
+        "schema_version": "readin.local-source-export.v0.1",
+        "export_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "grant_id": local_grant["grant_id"],
+        "asset_entity_id": asset_entity_id,
+        "prepared_at": "2026-09-04T12:10:00Z",
+        "parser": "GENERIC_JSON_OBSERVATION_BATCH",
+        "handling": {
+            "owner_attestation": "SELF_OR_CONTROLLED_ASSETS_ONLY",
+            "private_counterparty_data": "EXCLUDED",
+            "credential_material": "ABSENT",
+            "network_access": False,
+            "raw_export_retention": "USER_MANAGED_NOT_RECORDED",
+        },
+        "observations": [
+            {
+                "record_key": "profile-1",
+                "observation_type": "social.profile_metadata",
+                "observed_at": "2026-09-04T12:00:00Z",
+                "structured_payload": {
+                    "platform": asset_binding["platform"],
+                    "account_identifier": asset_binding["account_identifier"],
+                    "display_name": "Synthetic contract profile",
+                },
+            }
+        ],
+    }
+    validate_local_source_export(export_source)
+    local_source_export_events = build_local_source_export_events(
+        export_source,
+        source_sha256="4" * 64,
+        source_size=1024,
+        projection=export_projection,
+        occurred_at="2026-09-04T12:15:00Z",
+    )
+    for event in local_source_export_events:
+        validate_event(event)
+        export_projection.apply(event)
+    bad_export = deepcopy(export_source)
+    bad_export["handling"]["network_access"] = True
+    try:
+        validate_local_source_export(bad_export)
+    except LocalSourceExportError:
+        pass
+    else:
+        raise AssertionError("export accepted network access")
+    bad_export = deepcopy(export_source)
+    bad_export["grant_id"] = connector_grant_source["grant_id"]
+    try:
+        build_local_source_export_events(
+            bad_export,
+            source_sha256="5" * 64,
+            source_size=1024,
+            projection=export_projection,
+            occurred_at="2026-09-04T12:15:00Z",
+        )
+    except LocalSourceExportError:
+        pass
+    else:
+        raise AssertionError("export accepted an OAuth readiness grant")
     policy = build_github_public_repository_policy(
         "InvariantDynamics",
         "readin",
@@ -912,9 +1003,10 @@ def main() -> None:
         raise AssertionError("workbench accepted a non-loopback host")
 
     print(
-        f"PASS schemas=4 positive_events={len(events)} "
+        f"PASS schemas=5 positive_events={len(events)} "
         f"asset_catalog_events={len(asset_catalog_events)} "
         f"connector_grant_events={len(connector_grant_events)} "
+        f"local_source_export_events={len(local_source_export_events)} "
         f"residual_fixture_events={len(residual_events)} "
         f"negative_contract_vectors=29 negative_semantic_vectors=28 "
         f"tracked_assets={len(projection.assets)} "
@@ -938,7 +1030,7 @@ def main() -> None:
         f"residual_readbacks={len(projection.residual_readbacks)} "
         "workbench_contracts=1 negative_workbench_vectors=2 "
         "real_asset_policy_vectors=2 asset_catalog_policy_vectors=2 "
-        "connector_grant_policy_vectors=2"
+        "connector_grant_policy_vectors=2 local_source_export_policy_vectors=2"
     )
 
 

@@ -56,6 +56,7 @@ from readin.forecasting import (
     create_forecast_evaluation_design,
     execute_frozen_forecast_baseline,
 )
+from readin.local_source_exports import import_local_source_export
 from readin.projection import ProjectionError
 from readin.readback_selection import (
     ReadbackSelectionError,
@@ -213,6 +214,22 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     connector_grant_parser.add_argument("--occurred-at")
+
+    export_parser = subparsers.add_parser(
+        "import-local-source-export", help="Preview or import a prepared local profile export"
+    )
+    _add_ledger_argument(export_parser)
+    export_parser.add_argument("--source", required=True)
+    export_parser.add_argument("--grant", required=True)
+    export_parser.add_argument(
+        "--preview", action="store_true", help="Validate and report without writing"
+    )
+    export_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help="Attest self/controlled profile data with credentials and counterparty data excluded",
+    )
+    export_parser.add_argument("--occurred-at")
 
     entity_parser = subparsers.add_parser(
         "create-entity", help="Create and optionally track an entity"
@@ -893,6 +910,15 @@ def _run(args: argparse.Namespace) -> Any:
         }
 
     ledger = _ledger(args)
+    if args.command == "import-local-source-export":
+        return import_local_source_export(
+            ledger,
+            args.source,
+            grant_id=args.grant,
+            attested=args.attest,
+            preview=args.preview,
+            occurred_at=args.occurred_at,
+        )
     if args.command == "import-asset-catalog":
         return import_asset_catalog_source(
             ledger,

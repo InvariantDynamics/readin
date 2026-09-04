@@ -388,6 +388,8 @@ function renderSetup(asset) {
   const setup = asset.governance.source_setup;
   const catalog = state.snapshot.asset_catalog;
   const grant = asset.governance.connector_grant;
+  const sourceExports = asset.governance.source_exports ?? [];
+  const importedCount = sourceExports.reduce((sum, batch) => sum + batch.observation_count, 0);
   if (!setup) {
     return `<div class="case-view">
       <section class="case-hero is-unbound">
@@ -401,8 +403,11 @@ function renderSetup(asset) {
     </div>`;
   }
 
-  const nextAction =
-    setup.collection_mode === "LOCAL_EXPORT_IMPORT_ONLY"
+  const nextAction = sourceExports.length
+    ? "Imported profile records are ready to inspect in Evidence. Each record includes its source identity."
+    : grant?.access_mode === "LOCAL_EXPORT_IMPORT_ONLY"
+      ? "Prepare a profile metadata batch, preview it with import-local-source-export --preview, then import it with --attest."
+      : setup.collection_mode === "LOCAL_EXPORT_IMPORT_ONLY"
       ? "Next mechanism: add a source-specific local export parser and admit selected records as observations."
       : setup.collection_mode === "API_CONNECTION_REQUIRES_SEPARATE_GRANT"
         ? grant
@@ -521,11 +526,28 @@ function renderSetup(asset) {
     <li><span class="audit-index">03</span><div><strong>Track asset</strong><small>Entity and tracking records replay into the catalog</small></div>${stateTag("TRACKED")}</li>
     <li><span class="audit-index">04</span><div><strong>Record connector intent</strong><small>Capabilities are represented as states, not credentials or sessions</small></div>${stateTag(setup.connection_state)}</li>
     <li><span class="audit-index">05</span><div><strong>Record connector grant</strong><small>Scope, minimization, retention, revocation, and output observations are contracted separately</small></div>${stateTag(setup.connector_grant_state)}</li>
-    <li><span class="audit-index">06</span><div><strong>Gate live sensors</strong><small>OAuth, account APIs, monitoring, and external action remain unavailable until a later connector runner is explicitly enabled</small></div>${stateTag("LIVE_COLLECTION_DISABLED")}</li>
+    <li><span class="audit-index">06</span><div><strong>Import local profile records</strong><small>Preview a prepared export, validate its grant, and admit source observations</small></div>${stateTag(importedCount ? `${importedCount} RECORDS` : "AWAITING_EXPORT")}</li>
   </ol>`;
+
+  const importsBody = sourceExports.length
+    ? sourceExports.map((batch) => `<div class="collection-boundary">
+        <div><span>Profile export</span><strong>${escapeHtml(batch.observation_count)} imported records</strong></div>
+        ${stateTag(batch.state)}
+        ${factList([
+          ["Imported", batch.imported_at],
+          ["Export ID", batch.export_id],
+          ["Grant ID", batch.grant_id],
+          ["Source SHA-256", batch.source_sha256],
+          ["Source bytes", String(batch.source_size)],
+          ["Record types", batch.observation_types.join(", ")],
+        ])}
+      </div>`).join("")
+    : `<p>No profile records imported yet. The local importer accepts prepared JSON containing your platform, account identifier, display name, and optional catalog-matched profile URL.</p>
+       <p>Use a local-export grant with profile metadata scope and user-managed source retention. Native provider ZIP and CSV archives need a source-specific parser.</p>`;
 
   return `<div class="overview-grid">
     ${sectionCard("Asset source setup", setup.connection_state, setupBody, true)}
+    ${sectionCard("Imported source records", `${importedCount} records`, importsBody, true)}
     ${sectionCard("Connector grant readiness", grant ? grant.grant_state : "NOT_RECORDED", grantBody, true)}
     ${sectionCard("Operational ingestion path", "manifest → catalog → observations", pipeline, true)}
     ${sectionCard("Catalog asset classes", `${catalog.asset_count} declared`, `<ul class="record-list">${classRows}</ul>`)}
@@ -618,6 +640,23 @@ function renderClaims(asset) {
 }
 
 function renderEvidence(asset) {
+  const profileRecords = asset.evidence.observations.filter(
+    (item) => item.provenance.adapter === "local-source-export-batch",
+  );
+  const profileBody = profileRecords.map((item) => {
+    const payload = item.content.structured_payload;
+    return `<div class="collection-boundary">
+      <div><span>Source-reported profile</span><strong>${escapeHtml(payload.record?.display_name ?? "Unknown")}</strong></div>
+      ${factList(Object.entries(payload.record ?? {}).map(([key, value]) => [titleCase(key), value]))}
+      ${factList([
+        ["Observed", item.observed_at],
+        ["Observation ID", item.id],
+        ["Evidence ID", item.source_artifact_id],
+        ["Export ID", payload.source_export?.export_id],
+      ])}
+      <p>User-supplied record. Provider origin and source completeness are unverified.</p>
+    </div>`;
+  }).join("");
   const observations = asset.evidence.observations.length
     ? `<ul class="record-list">${asset.evidence.observations
         .map(
@@ -652,6 +691,7 @@ function renderEvidence(asset) {
         .join("")}</ul>`
     : emptyState();
   return `<div class="overview-grid">
+    ${profileRecords.length ? sectionCard("Imported profile records", `${profileRecords.length} records`, profileBody, true) : ""}
     ${sectionCard("Admitted observations", `${asset.evidence.observations.length} immutable`, observations, true)}
     ${sectionCard("Evidence manifests", `${asset.evidence.manifests.length} immutable`, manifests, true)}
     ${sectionCard("Dependency ancestry", `${asset.evidence.dependencies.length} edges`, dependencies, true)}

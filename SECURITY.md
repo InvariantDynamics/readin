@@ -52,6 +52,15 @@ provider, parses no export, starts no monitor, and authorizes no people targetin
 action. It exists only to bind future source-runner implementation to explicit scopes,
 minimization, allowed observation outputs, retention, revocation, audit, and redaction controls.
 
+H3 adds explicit CLI admission of prepared local profile JSON under a matching local-export grant.
+It accepts only closed profile fields, enforces catalog identity and grant controls, and provides
+a read-only preview. Inputs are limited to 1 MiB and 200 rows; duplicate JSON keys, non-finite
+values, symlinks, non-private files, and Git checkout paths are rejected. Field validation errors
+do not echo rejected values. String contents remain operator-attested; this is not a semantic
+secret detector. Source files are not copied or deleted, and retention days are not enforced.
+Only user-managed raw retention is supported. Batch validation precedes all writes under one lock;
+filesystem crashes can still truncate JSONL. No native archive extraction or provider access occurs.
+
 The loopback workbench has no authentication. It accepts only numeric `127.0.0.1` or `::1` listener
 bindings, verifies the bound socket is loopback, validates `Host` and `Origin`, and refuses mutation
 methods, but should still be treated as a same-user local presentation surface.
