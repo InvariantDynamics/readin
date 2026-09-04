@@ -230,6 +230,119 @@ acquisition requires a new case in H0.
 See [ADR 0017](docs/adr/0017-bounded-public-repository-acquisition.md) and
 [Security](SECURITY.md) before adding any other connector or target class.
 
+## Local personal asset catalog onboarding
+
+READIN can now start with your own asset surface before any live connector is granted. Create a
+private local manifest outside Git and cloud-synchronized folders, then import it into a private
+ledger:
+
+```shell
+READIN_ASSET_DIR="$HOME/.local/share/readin/personal-catalog"
+mkdir -p "$READIN_ASSET_DIR"
+chmod 700 "$READIN_ASSET_DIR"
+
+$EDITOR "$READIN_ASSET_DIR/source.json"
+chmod 600 "$READIN_ASSET_DIR/source.json"
+
+uv run readin import-asset-catalog \
+  --ledger "$READIN_ASSET_DIR/events.jsonl" \
+  --manifest "$READIN_ASSET_DIR/source.json" \
+  --attest
+
+uv run readin workbench \
+  --ledger "$READIN_ASSET_DIR/events.jsonl" \
+  --host 127.0.0.1 \
+  --port 4173 \
+  --open-browser
+```
+
+Minimal manifest shape:
+
+Replace `catalog_id` with a fresh lowercase UUID, for example:
+
+```shell
+uuidgen | tr 'A-F' 'a-f'
+```
+
+```json
+{
+  "schema_version": "readin.asset-catalog-source.v0.1",
+  "catalog_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "catalog_name": "Personal asset surface",
+  "declared_at": "2026-09-04T12:00:00Z",
+  "owner": {
+    "label": "Local operator",
+    "attestation": "USER_ATTESTED_NOT_VERIFIED",
+    "scope": "SELF_OR_CONTROLLED_ASSETS_ONLY"
+  },
+  "purpose": {
+    "kind": "PERSONAL_ASSET_CATALOG",
+    "statement": "Build a local inventory of accounts and assets before any live connector.",
+    "secondary_use": "PROHIBITED"
+  },
+  "authority": {
+    "state": "NO_AUTHORITY",
+    "collection": "NOT_GRANTED",
+    "external_actions": "PROHIBITED",
+    "credential_storage": "PROHIBITED",
+    "network_access": false,
+    "people_targeting": "PROHIBITED"
+  },
+  "source": {
+    "kind": "USER_DECLARED_LOCAL_MANIFEST",
+    "network_access": false,
+    "credential_material": "ABSENT",
+    "path_retention": "NOT_RECORDED_IN_LEDGER"
+  },
+  "assets": [
+    {
+      "asset_class": "SOCIAL_ACCOUNT",
+      "display_name": "My LinkedIn account",
+      "platform": "LinkedIn",
+      "account_identifier": "my-handle",
+      "source_uri": "https://www.linkedin.com/in/my-handle/",
+      "authorization_basis": "USER_OWNED_ACCOUNT_ATTESTED",
+      "collection_mode": "API_CONNECTION_REQUIRES_SEPARATE_GRANT",
+      "connector_intent": {
+        "connector_kind": "OAUTH_API",
+        "connection_state": "OAUTH_REQUIRED_NOT_REQUESTED",
+        "credential_state": "NONE",
+        "oauth_state": "NOT_REQUESTED",
+        "live_collection_state": "DISABLED",
+        "external_action_state": "PROHIBITED",
+        "terms_review_state": "REQUIRES_REVIEW"
+      }
+    },
+    {
+      "asset_class": "WEB_PROPERTY",
+      "display_name": "My public website",
+      "platform": "HTTPS",
+      "account_identifier": "example.com",
+      "source_uri": "https://example.com/",
+      "authorization_basis": "USER_ADMINISTERED_ASSET_ATTESTED",
+      "collection_mode": "LOCAL_EXPORT_IMPORT_ONLY",
+      "connector_intent": {
+        "connector_kind": "PUBLIC_WEB",
+        "connection_state": "EXPORT_IMPORT_READY",
+        "credential_state": "NONE",
+        "oauth_state": "NOT_REQUIRED",
+        "live_collection_state": "DISABLED",
+        "external_action_state": "PROHIBITED",
+        "terms_review_state": "USER_ATTESTED_ALLOWED"
+      }
+    }
+  ]
+}
+```
+
+This command hashes the manifest as local evidence, creates tracked asset records, and admits one
+immutable `asset_catalog.user_declared_profile` observation per asset. It does not contact the
+listed services. OAuth, social APIs, private messages, follower graphs, contacts, monitoring,
+person-target dossiers, and external actions remain unavailable until a later connector contract
+explicitly grants and tests them.
+
+See [ADR 0018](docs/adr/0018-local-asset-catalog-onboarding.md) for the full onboarding boundary.
+
 ## Quick start
 
 Install [uv](https://docs.astral.sh/uv/), then:

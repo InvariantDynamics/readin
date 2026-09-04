@@ -112,13 +112,32 @@ def _claim_object_label(projection: ReadinProjection, value: dict[str, Any]) -> 
     return json.dumps(value["value"], sort_keys=True, ensure_ascii=False)
 
 
+def _asset_catalog_binding(entity: dict[str, Any]) -> dict[str, Any] | None:
+    binding = entity["attributes"].get("asset_catalog_binding")
+    return binding if isinstance(binding, dict) else None
+
+
+def _connector_intent(binding: dict[str, Any] | None) -> dict[str, Any] | None:
+    if binding is None:
+        return None
+    connector = binding.get("connector_intent")
+    return connector if isinstance(connector, dict) else None
+
+
 def _catalog_item(item: dict[str, Any]) -> dict[str, Any]:
     entity = item["entity"]
     tracked = item["tracked_asset"]
+    binding = _asset_catalog_binding(entity)
+    connector = _connector_intent(binding)
     return {
         "id": entity["id"],
         "canonical_name": entity["canonical_name"],
         "entity_type": entity["type"],
+        "asset_class": binding.get("asset_class") if binding else None,
+        "platform": binding.get("platform") if binding else None,
+        "connection_state": connector.get("connection_state") if connector else None,
+        "connector_kind": connector.get("connector_kind") if connector else None,
+        "live_collection_state": connector.get("live_collection_state") if connector else None,
         "priority": tracked["tracking"]["priority"],
         "state_version": tracked["epistemic_state_version"],
         "counts": {
@@ -128,6 +147,32 @@ def _catalog_item(item: dict[str, Any]) -> dict[str, Any]:
             "hypotheses": item["hypothesis_count"],
             "scenarios": item["scenario_count"],
         },
+        "authority_state": "NO_AUTHORITY",
+    }
+
+
+def _asset_catalog_workbench_summary(catalog: list[dict[str, Any]]) -> dict[str, Any]:
+    catalog_items = [item for item in catalog if item["asset_class"] is not None]
+    class_counts: dict[str, int] = {}
+    connection_counts: dict[str, int] = {}
+    connector_counts: dict[str, int] = {}
+    for item in catalog_items:
+        class_counts[item["asset_class"]] = class_counts.get(item["asset_class"], 0) + 1
+        connection_state = item["connection_state"] or "UNKNOWN"
+        connection_counts[connection_state] = connection_counts.get(connection_state, 0) + 1
+        connector_kind = item["connector_kind"] or "UNKNOWN"
+        connector_counts[connector_kind] = connector_counts.get(connector_kind, 0) + 1
+    return {
+        "state": ("LOCAL_MANIFEST_ASSET_CATALOG_PRESENT" if catalog_items else "NOT_PRESENT"),
+        "asset_count": len(catalog_items),
+        "asset_class_counts": dict(sorted(class_counts.items())),
+        "connection_state_counts": dict(sorted(connection_counts.items())),
+        "connector_kind_counts": dict(sorted(connector_counts.items())),
+        "credential_state": "NONE",
+        "live_collection_state": "DISABLED",
+        "network_access": False,
+        "external_action_state": "PROHIBITED",
+        "people_targeting": "PROHIBITED",
         "authority_state": "NO_AUTHORITY",
     }
 
@@ -431,6 +476,8 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
     view = projection.asset_view(entity_id)
     entity = view["entity"]
     real_asset_case_binding = entity["attributes"].get("real_asset_case_binding")
+    asset_catalog_binding = _asset_catalog_binding(entity)
+    connector_intent = _connector_intent(asset_catalog_binding)
     tracked = view["tracked_asset"]
     observation_count_by_frame: dict[str, int] = {}
     for observation in view["observations"]:
@@ -918,7 +965,36 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "state": (
                 "REAL_ASSET_CASE_BINDING_DECLARED"
                 if real_asset_case_binding is not None
-                else "LEGACY_UNGOVERNED"
+                else (
+                    "ASSET_CATALOG_BINDING_DECLARED"
+                    if asset_catalog_binding is not None
+                    else "LEGACY_UNGOVERNED"
+                )
+            ),
+            "asset_catalog_binding": deepcopy(asset_catalog_binding),
+            "connector_intent": deepcopy(connector_intent),
+            "source_setup": (
+                {
+                    "asset_class": asset_catalog_binding["asset_class"],
+                    "platform": asset_catalog_binding["platform"],
+                    "account_identifier": asset_catalog_binding["account_identifier"],
+                    "source_uri": asset_catalog_binding["source_uri"],
+                    "authorization_basis": asset_catalog_binding["authorization_basis"],
+                    "collection_mode": asset_catalog_binding["collection_mode"],
+                    "connector_kind": connector_intent["connector_kind"],
+                    "connection_state": connector_intent["connection_state"],
+                    "credential_state": connector_intent["credential_state"],
+                    "oauth_state": connector_intent["oauth_state"],
+                    "terms_review_state": connector_intent["terms_review_state"],
+                    "live_collection_state": connector_intent["live_collection_state"],
+                    "network_access": asset_catalog_binding["authority"]["network_access"],
+                    "external_action_state": connector_intent["external_action_state"],
+                    "source_digest_sha256": asset_catalog_binding["source_digest_sha256"],
+                    "owner_attestation": asset_catalog_binding["ownership_attestation"],
+                    "people_targeting": asset_catalog_binding["authority"]["people_targeting"],
+                }
+                if asset_catalog_binding is not None and connector_intent is not None
+                else None
             ),
             "real_asset_case_binding": deepcopy(real_asset_case_binding),
         },
@@ -1057,6 +1133,7 @@ def build_workbench_snapshot(
             "operational_use": "PROHIBITED",
             "writes": "DISABLED",
         },
+        "asset_catalog": _asset_catalog_workbench_summary(catalog),
         "case": None,
         "epistemic_limits": {
             "coverage_state": "NOT_ESTABLISHED",

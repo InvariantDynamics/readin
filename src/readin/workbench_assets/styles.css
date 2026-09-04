@@ -464,6 +464,15 @@ p {
   text-transform: uppercase;
 }
 
+.asset-item-connection {
+  display: block;
+  margin-top: 8px;
+}
+
+.asset-item-connection .state-tag {
+  max-width: 100%;
+}
+
 .catalog-footer {
   display: grid;
   grid-template-columns: 1fr auto;

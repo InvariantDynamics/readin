@@ -14,8 +14,10 @@ in a public issue.
 
 The Phase 0 through Phase 8G runtime remains a local reference implementation centered on manual and
 synthetic input. The experimental real-asset H0 slice adds exactly one live path: a user-invoked,
-credential-free request for one policy-declared public GitHub repository metadata record. It is not
-a general URL client, crawler, authenticated account connector, person-search system, or monitor.
+credential-free request for one policy-declared public GitHub repository metadata record. The local
+asset-catalog onboarding slice can also import an owner-only local JSON manifest of self or
+controlled assets, but it performs no live source access. READIN is not a general URL client,
+crawler, authenticated account connector, person-search system, or monitor.
 
 H0 sends no credential or cookie, disables proxies and redirects, makes one bounded request, stores
 exact response bytes in an owner-only case vault, and admits only an allowlisted repository-level
@@ -35,6 +37,14 @@ Completed-case reads fail closed unless the policy, genesis binding, request mar
 raw artifact hash and size, evidence manifest, and admitted observation remain mutually consistent.
 This is application-level tamper detection, not WORM storage or protection from a process already
 running as the same macOS user.
+
+Personal asset-catalog manifests must be stored outside Git checkouts and cloud-synchronized
+folders. The importer rejects non-owner-only manifest files, records only a digest URI rather than
+the manifest path, and admits asset declarations as user-declared observations with
+`NO_AUTHORITY`. Connector states such as `OAUTH_REQUIRED_NOT_REQUESTED` and
+`EXPORT_IMPORT_READY` are readiness labels only; they are not credentials, grants, sessions, API
+tokens, source-term approval, private-message access, follower/contact graph access, monitoring, or
+permission to investigate third parties.
 
 The loopback workbench has no authentication. It accepts only numeric `127.0.0.1` or `::1` listener
 bindings, verifies the bound socket is loopback, validates `Host` and `Origin`, and refuses mutation

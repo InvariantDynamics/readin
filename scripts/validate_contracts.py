@@ -7,6 +7,12 @@ from datetime import UTC, datetime
 
 from jsonschema import Draft202012Validator
 
+from readin.asset_catalog import (
+    AssetCatalogContractError,
+    build_asset_catalog_events,
+    load_asset_catalog_source_schema,
+    validate_asset_catalog_source,
+)
 from readin.contracts import ContractViolation, load_event_schema, validate_event
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
@@ -29,11 +35,94 @@ def _must_reject_contract(event: dict[str, object]) -> None:
     raise AssertionError("negative contract vector was accepted")
 
 
+def _asset_catalog_source() -> dict[str, object]:
+    return {
+        "schema_version": "readin.asset-catalog-source.v0.1",
+        "catalog_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "catalog_name": "Contract validation catalog",
+        "declared_at": "2026-09-04T12:00:00Z",
+        "owner": {
+            "label": "Local operator",
+            "attestation": "USER_ATTESTED_NOT_VERIFIED",
+            "scope": "SELF_OR_CONTROLLED_ASSETS_ONLY",
+        },
+        "purpose": {
+            "kind": "PERSONAL_ASSET_CATALOG",
+            "statement": "Validate local asset-catalog onboarding without live collection.",
+            "secondary_use": "PROHIBITED",
+        },
+        "authority": {
+            "state": "NO_AUTHORITY",
+            "collection": "NOT_GRANTED",
+            "external_actions": "PROHIBITED",
+            "credential_storage": "PROHIBITED",
+            "network_access": False,
+            "people_targeting": "PROHIBITED",
+        },
+        "source": {
+            "kind": "USER_DECLARED_LOCAL_MANIFEST",
+            "network_access": False,
+            "credential_material": "ABSENT",
+            "path_retention": "NOT_RECORDED_IN_LEDGER",
+        },
+        "assets": [
+            {
+                "asset_class": "SOCIAL_ACCOUNT",
+                "display_name": "Example social account",
+                "platform": "ExampleSocial",
+                "account_identifier": "operator",
+                "source_uri": "https://social.example/operator",
+                "authorization_basis": "USER_OWNED_ACCOUNT_ATTESTED",
+                "collection_mode": "API_CONNECTION_REQUIRES_SEPARATE_GRANT",
+                "connector_intent": {
+                    "connector_kind": "OAUTH_API",
+                    "connection_state": "OAUTH_REQUIRED_NOT_REQUESTED",
+                    "credential_state": "NONE",
+                    "oauth_state": "NOT_REQUESTED",
+                    "live_collection_state": "DISABLED",
+                    "external_action_state": "PROHIBITED",
+                    "terms_review_state": "REQUIRES_REVIEW",
+                },
+            }
+        ],
+    }
+
+
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
     policy_schema = load_real_asset_policy_schema()
     Draft202012Validator.check_schema(policy_schema)
+    asset_catalog_schema = load_asset_catalog_source_schema()
+    Draft202012Validator.check_schema(asset_catalog_schema)
+    asset_catalog_source = _asset_catalog_source()
+    validate_asset_catalog_source(asset_catalog_source)
+    promoted_catalog = deepcopy(asset_catalog_source)
+    promoted_catalog["authority"]["network_access"] = True  # type: ignore[index]
+    try:
+        validate_asset_catalog_source(promoted_catalog)
+    except AssetCatalogContractError:
+        pass
+    else:
+        raise AssertionError("asset catalog source network promotion was accepted")
+    connected_catalog = deepcopy(asset_catalog_source)
+    connected_catalog["assets"][0]["connector_intent"]["connection_state"] = "OAUTH_CONNECTED"  # type: ignore[index]
+    try:
+        validate_asset_catalog_source(connected_catalog)
+    except AssetCatalogContractError:
+        pass
+    else:
+        raise AssertionError("asset catalog source accepted an OAuth-connected state")
+    asset_catalog_events = build_asset_catalog_events(
+        asset_catalog_source,
+        source_sha256="0" * 64,
+        source_size=1024,
+    )
+    for event in asset_catalog_events:
+        validate_event(event)
+    asset_catalog_projection = ReadinProjection.replay(asset_catalog_events)
+    if len(asset_catalog_projection.assets) != 1:
+        raise AssertionError("asset catalog source did not replay into a tracked asset")
     policy = build_github_public_repository_policy(
         "InvariantDynamics",
         "readin",
@@ -673,9 +762,10 @@ def main() -> None:
         raise AssertionError("workbench accepted a non-loopback host")
 
     print(
-        f"PASS schemas=2 positive_events={len(events)} "
+        f"PASS schemas=3 positive_events={len(events)} "
+        f"asset_catalog_events={len(asset_catalog_events)} "
         f"residual_fixture_events={len(residual_events)} "
-        f"negative_contract_vectors=27 negative_semantic_vectors=28 "
+        f"negative_contract_vectors=29 negative_semantic_vectors=28 "
         f"tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
         f"resolution_candidates={len(projection.resolution_candidates)} "
@@ -695,7 +785,8 @@ def main() -> None:
         f"forecast_validity_assessments={len(projection.forecast_validity_assessments)} "
         f"forecast_fitter_specifications={len(projection.forecast_fitter_specifications)} "
         f"residual_readbacks={len(projection.residual_readbacks)} "
-        "workbench_contracts=1 negative_workbench_vectors=2 real_asset_policy_vectors=2"
+        "workbench_contracts=1 negative_workbench_vectors=2 "
+        "real_asset_policy_vectors=2 asset_catalog_policy_vectors=2"
     )
 
 

@@ -1,5 +1,14 @@
 """READIN Phase 0 through Phase 8G reference runtime."""
 
+from readin.asset_catalog import (
+    AssetCatalogContractError,
+    AssetCatalogError,
+    build_asset_catalog_events,
+    import_asset_catalog_source,
+    load_asset_catalog_source,
+    load_asset_catalog_source_schema,
+    validate_asset_catalog_source,
+)
 from readin.belief import BeliefRuntimeError, execute_belief_revision
 from readin.contracts import ContractViolation, validate_event
 from readin.discrimination import (
@@ -76,6 +85,8 @@ from readin.workbench import WorkbenchError, build_workbench_snapshot, create_wo
 
 __all__ = [
     "ContractViolation",
+    "AssetCatalogContractError",
+    "AssetCatalogError",
     "BeliefRuntimeError",
     "DiscriminationRuntimeError",
     "EventLedger",
@@ -92,6 +103,7 @@ __all__ = [
     "ResidualRuntimeError",
     "ScenarioRuntimeError",
     "WorkbenchError",
+    "build_asset_catalog_events",
     "build_workbench_snapshot",
     "create_belief_edge_created",
     "create_belief_revision_completed",
@@ -139,6 +151,10 @@ __all__ = [
     "execute_belief_revision",
     "execute_discrimination_plan",
     "execute_scenario",
+    "import_asset_catalog_source",
+    "load_asset_catalog_source",
+    "load_asset_catalog_source_schema",
+    "validate_asset_catalog_source",
     "validate_event",
 ]
 

@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from readin.asset_catalog import AssetCatalogError, import_asset_catalog_source
 from readin.belief import BeliefRuntimeError, execute_belief_revision
 from readin.contracts import ContractViolation
 from readin.discrimination import (
@@ -180,6 +181,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Make the case-authorized one-shot credential-free GitHub metadata request",
     )
     collect_real_case_parser.add_argument("--case-dir", required=True)
+
+    asset_catalog_parser = subparsers.add_parser(
+        "import-asset-catalog",
+        help="Import a private local manifest of self/controlled assets without live collection",
+    )
+    _add_ledger_argument(asset_catalog_parser)
+    asset_catalog_parser.add_argument("--manifest", required=True)
+    asset_catalog_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help=(
+            "Attest the manifest is limited to self/controlled assets and grants no live collection"
+        ),
+    )
+    asset_catalog_parser.add_argument("--occurred-at")
 
     entity_parser = subparsers.add_parser(
         "create-entity", help="Create and optionally track an entity"
@@ -860,6 +876,14 @@ def _run(args: argparse.Namespace) -> Any:
         }
 
     ledger = _ledger(args)
+    if args.command == "import-asset-catalog":
+        return import_asset_catalog_source(
+            ledger,
+            args.manifest,
+            attested=args.attest,
+            occurred_at=args.occurred_at,
+        )
+
     if args.command == "init":
         ledger.initialize()
         return {
@@ -1355,6 +1379,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _emit(_run(args))
         return 0
     except (
+        AssetCatalogError,
         ContractViolation,
         DiscriminationRuntimeError,
         BeliefRuntimeError,

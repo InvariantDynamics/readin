@@ -47,6 +47,7 @@ function stateClass(value) {
     text.includes("MATCHED") ||
     text.includes("VERIFIED") ||
     text.includes("ADMITTED") ||
+    text.includes("READY") ||
     text === "FIT"
   ) {
     return "is-good";
@@ -83,7 +84,7 @@ function emptyState() {
 function renderCatalog() {
   const catalog = state.snapshot?.catalog ?? [];
   const filtered = catalog.filter((item) => {
-    const haystack = `${item.canonical_name} ${item.entity_type} ${item.id}`.toLowerCase();
+    const haystack = `${item.canonical_name} ${item.entity_type} ${item.asset_class ?? ""} ${item.platform ?? ""} ${item.connection_state ?? ""} ${item.id}`.toLowerCase();
     return haystack.includes(state.search.toLowerCase());
   });
   byId("asset-count").textContent = String(catalog.length);
@@ -94,8 +95,11 @@ function renderCatalog() {
             type="button" data-asset-id="${escapeHtml(item.id)}">
             <span class="asset-item-name">${escapeHtml(item.canonical_name)}</span>
             <span class="asset-item-meta">
-              <span>${escapeHtml(item.entity_type)}</span>
-              <span>${item.counts.observations} obs · ${item.counts.claims} claims</span>
+              <span>${escapeHtml(item.asset_class ?? item.entity_type)}</span>
+              <span>${escapeHtml(item.platform ?? "local")} · ${item.counts.observations} obs</span>
+            </span>
+            <span class="asset-item-connection">
+              ${stateTag(item.connection_state ?? "UNBOUND")}
             </span>
           </button>`,
         )
@@ -377,6 +381,89 @@ function renderAudit() {
       ${sectionCard("Receipt and response", caseFile.collection.result, response, true)}
       ${sectionCard("Ledger event sequence", audit.sequence_state, events, true)}
     </div>
+  </div>`;
+}
+
+function renderSetup(asset) {
+  const setup = asset.governance.source_setup;
+  const catalog = state.snapshot.asset_catalog;
+  if (!setup) {
+    return `<div class="case-view">
+      <section class="case-hero is-unbound">
+        <div>
+          <span class="eyebrow">Source setup</span>
+          <h2>No asset-catalog binding</h2>
+          <p>This asset was not imported from a local personal-asset manifest. It can still be inspected as a tracked asset, but no connector intent is recorded.</p>
+        </div>
+        ${stateTag(asset.governance.state)}
+      </section>
+    </div>`;
+  }
+
+  const nextAction =
+    setup.collection_mode === "LOCAL_EXPORT_IMPORT_ONLY"
+      ? "Next mechanism: add a source-specific local export parser and admit selected records as observations."
+      : setup.collection_mode === "API_CONNECTION_REQUIRES_SEPARATE_GRANT"
+        ? "Next mechanism: create a separate connector grant contract before any OAuth or API read can occur."
+        : "Next mechanism: enter or attach source observations manually through the local ledger.";
+  const classes = catalog.asset_class_counts ?? {};
+  const connections = catalog.connection_state_counts ?? {};
+  const classRows = Object.entries(classes)
+    .map(
+      ([label, value]) => `<li class="record-row">
+        <div class="record-primary">${escapeHtml(titleCase(label))}</div>
+        <div class="record-secondary">Declared asset class</div>
+        ${stateTag(value)}
+      </li>`,
+    )
+    .join("");
+  const connectionRows = Object.entries(connections)
+    .map(
+      ([label, value]) => `<li class="record-row">
+        <div class="record-primary">${escapeHtml(label)}</div>
+        <div class="record-secondary">Connector state count</div>
+        ${stateTag(value)}
+      </li>`,
+    )
+    .join("");
+
+  const setupBody = `<div class="collection-boundary">
+    <div><span>${escapeHtml(setup.platform)}</span><strong>${escapeHtml(setup.account_identifier)}</strong></div>
+    <div class="collection-boundary-states">
+      ${stateTag(setup.connection_state)}
+      ${stateTag(setup.credential_state)}
+      ${stateTag(setup.live_collection_state)}
+    </div>
+    <p>${escapeHtml(nextAction)}</p>
+  </div>
+  ${factList([
+    ["Asset class", setup.asset_class],
+    ["Connector kind", setup.connector_kind],
+    ["Collection mode", setup.collection_mode],
+    ["Authorization basis", setup.authorization_basis],
+    ["Owner attestation", setup.owner_attestation],
+    ["Terms review", setup.terms_review_state],
+    ["OAuth", setup.oauth_state],
+    ["Network access", String(setup.network_access)],
+    ["External action", setup.external_action_state],
+    ["People targeting", setup.people_targeting],
+    ["Source URI", setup.source_uri ?? "not declared"],
+    ["Source digest", `sha256:${setup.source_digest_sha256}`],
+  ])}`;
+
+  const pipeline = `<ol class="audit-sequence">
+    <li><span class="audit-index">01</span><div><strong>Declare asset</strong><small>Private local manifest, owner-attested, schema validated</small></div>${stateTag("DONE")}</li>
+    <li><span class="audit-index">02</span><div><strong>Manifest source</strong><small>SHA-256 evidence identity; source path not recorded in ledger</small></div>${stateTag("ADMITTED")}</li>
+    <li><span class="audit-index">03</span><div><strong>Track asset</strong><small>Entity and tracking records replay into the catalog</small></div>${stateTag("TRACKED")}</li>
+    <li><span class="audit-index">04</span><div><strong>Record connector intent</strong><small>Capabilities are represented as states, not credentials or sessions</small></div>${stateTag(setup.connection_state)}</li>
+    <li><span class="audit-index">05</span><div><strong>Gate live sensors</strong><small>OAuth, account APIs, monitoring, and external action remain unavailable until separately granted</small></div>${stateTag("LIVE_COLLECTION_DISABLED")}</li>
+  </ol>`;
+
+  return `<div class="overview-grid">
+    ${sectionCard("Asset source setup", setup.connection_state, setupBody, true)}
+    ${sectionCard("Operational ingestion path", "manifest → catalog → observations", pipeline, true)}
+    ${sectionCard("Catalog asset classes", `${catalog.asset_count} declared`, `<ul class="record-list">${classRows}</ul>`)}
+    ${sectionCard("Connector states", catalog.live_collection_state, `<ul class="record-list">${connectionRows}</ul>`)}
   </div>`;
 }
 
@@ -817,6 +904,7 @@ function renderActiveView(asset) {
   const renderers = {
     case: renderCase,
     audit: renderAudit,
+    setup: renderSetup,
     overview: renderOverview,
     claims: renderClaims,
     evidence: renderEvidence,
@@ -828,6 +916,12 @@ function renderActiveView(asset) {
     timeline: renderTimeline,
   };
   byId("view-panel").innerHTML = renderers[state.activeTab](asset);
+}
+
+function syncActiveTabButtons() {
+  document.querySelectorAll("[data-tab]").forEach((item) => {
+    item.classList.toggle("is-active", item.dataset.tab === state.activeTab);
+  });
 }
 
 function renderSnapshot() {
@@ -857,6 +951,10 @@ async function loadSnapshot(assetId = null) {
     if (!response.ok) throw new Error(payload.error ?? `Request failed: ${response.status}`);
     state.snapshot = payload;
     state.selectedAssetId = payload.selected_asset?.identity.id ?? null;
+    if (!payload.case && payload.selected_asset?.governance?.source_setup && state.activeTab === "case") {
+      state.activeTab = "setup";
+      syncActiveTabButtons();
+    }
     renderSnapshot();
   } catch (error) {
     byId("view-panel").innerHTML = `<div class="error-state">
@@ -872,9 +970,7 @@ if (document.documentElement.dataset.launchMode === "served") {
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.activeTab = button.dataset.tab;
-      document.querySelectorAll("[data-tab]").forEach((item) => {
-        item.classList.toggle("is-active", item === button);
-      });
+      syncActiveTabButtons();
       if (state.snapshot?.selected_asset) renderActiveView(state.snapshot.selected_asset);
     });
   });
