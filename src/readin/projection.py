@@ -1605,10 +1605,13 @@ class ReadinProjection:
         manifest = self.evidence[observation["source_artifact_id"]]
         frame = self.frames[observation["observer_frame_id"]]
         source_policy = observation["provenance"]["source_policy"]
+        epistemic_scope = observation["epistemic"]["access_scope"]
         if source_policy != manifest["access_policy"]:
             raise ProjectionError("observation source policy does not match evidence manifest")
         if source_policy != frame["access_projection"]["scope"]:
             raise ProjectionError("observation source policy does not match observer frame")
+        if source_policy != epistemic_scope:
+            raise ProjectionError("observation access scope does not match source policy")
 
         observation_uri = observation["provenance"]["source_uri"]
         manifest_uri = manifest["source"]["uri"]

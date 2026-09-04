@@ -24,6 +24,7 @@ from readin.workbench import (
     WorkbenchError,
     build_workbench_snapshot,
     create_workbench_server,
+    serve_workbench,
     validate_loopback_host,
 )
 
@@ -55,6 +56,7 @@ def test_workbench_projection_preserves_phase5_boundaries() -> None:
         "operational_use": "PROHIBITED",
         "writes": "DISABLED",
     }
+    assert snapshot["case"] is None
     assert snapshot["epistemic_limits"] == {
         "coverage_state": "NOT_ESTABLISHED",
         "completeness_claim": "NOT_MADE",
@@ -77,6 +79,8 @@ def test_workbench_projection_preserves_phase5_boundaries() -> None:
     assert asset["cartography"]["latest_query"]["aperture"]["excluded_asset_observation_count"] == 1
     assert asset["cartography"]["latest_query"]["aperture"]["coverage_state"] == ("NOT_ESTABLISHED")
     assert asset["claims"][0]["independence_status"] == "DEPENDENT_EVIDENCE_PRESENT"
+    assert len(asset["evidence"]["observations"]) == asset["counts"]["observations"]
+    assert asset["evidence"]["manifests"][0]["size"] > 0
     assert asset["fitters"]["latest_run"]["outcome_counts"]["INVALID"] == 1
     assert asset["fitters"]["latest_run"]["consensus"]["state"] == "NOT_COMPUTED"
     assert asset["belief"]["latest_revision"]["probability_state"] == "NOT_COMPUTED"
@@ -280,12 +284,23 @@ def test_workbench_projection_supports_empty_catalog_and_rejects_unknown_asset()
         build_workbench_snapshot(ReadinProjection.replay(phase5_events()), "missing")
 
 
-def test_workbench_refuses_non_loopback_binding() -> None:
-    validate_loopback_host("localhost")
+def test_workbench_refuses_non_numeric_or_non_loopback_binding() -> None:
     validate_loopback_host("127.0.0.1")
+    validate_loopback_host("::1")
 
-    with pytest.raises(WorkbenchError, match="loopback-only"):
+    with pytest.raises(WorkbenchError, match="numeric loopback"):
+        validate_loopback_host("localhost")
+    with pytest.raises(WorkbenchError, match="numeric loopback"):
         validate_loopback_host("0.0.0.0")
+
+
+def test_workbench_server_confirms_numeric_loopback_binding(tmp_path: Path) -> None:
+    ledger = _phase5_ledger(tmp_path / "events.jsonl")
+    server = create_workbench_server(ledger.path, host="127.0.0.1", port=0)
+    try:
+        assert server.server_address[0] == "127.0.0.1"
+    finally:
+        server.server_close()
 
 
 def test_workbench_server_is_static_and_read_only(tmp_path: Path) -> None:
@@ -305,6 +320,18 @@ def test_workbench_server_is_static_and_read_only(tmp_path: Path) -> None:
         assert response.getheader("Content-Security-Policy") == (
             "default-src 'self'; script-src 'self'"
         )
+
+        for asset_path, media_type, marker in (
+            ("/styles.css", "text/css", ".launch-diagnostic"),
+            ("/launch-guard.js", "text/javascript", "dataset.launchMode"),
+            ("/app.js", "text/javascript", "loadSnapshot"),
+        ):
+            connection.request("GET", asset_path)
+            response = connection.getresponse()
+            body = response.read().decode("utf-8")
+            assert response.status == 200
+            assert response.getheader("Content-Type").startswith(media_type)
+            assert marker in body
 
         connection.request("HEAD", "/")
         response = connection.getresponse()
@@ -334,6 +361,199 @@ def test_workbench_server_is_static_and_read_only(tmp_path: Path) -> None:
         payload = json.loads(response.read())
         assert response.status == 404
         assert payload["authority_state"] == "NO_AUTHORITY"
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_workbench_source_file_has_a_fail_loud_launch_state() -> None:
+    asset_root = Path(__file__).parents[1] / "src" / "readin" / "workbench_assets"
+    index = (asset_root / "index.html").read_text(encoding="utf-8")
+    app = (asset_root / "app.js").read_text(encoding="utf-8")
+    styles = (asset_root / "styles.css").read_text(encoding="utf-8")
+    launch_guard = (asset_root / "launch-guard.js").read_text(encoding="utf-8")
+
+    assert 'data-launch-mode="pending"' in index
+    assert "This source file is not the application." in index
+    assert 'src="./launch-guard.js"' in index
+    assert 'href="./styles.css"' in index
+    assert 'src="./app.js"' in index
+    assert 'data-tab="case"' in index
+    assert 'data-tab="audit"' in index
+    assert "function renderCase(asset)" in app
+    assert "function renderAudit()" in app
+    assert "Evidence custody" in app
+    assert "Observed repository record" in app
+    assert "Ledger event sequence" in app
+    assert 'html:not([data-launch-mode="served"]) .app-shell' in styles
+    assert 'html[data-launch-mode="served"] .launch-diagnostic' in styles
+    assert ".audit-sequence" in styles
+    assert 'launchProtocol === "http:" || launchProtocol === "https:"' in launch_guard
+
+
+def test_serve_workbench_can_open_its_bound_loopback_url(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeServer:
+        server_port = 4317
+
+        def serve_forever(self) -> None:
+            calls["served"] = True
+
+        def server_close(self) -> None:
+            calls["closed"] = True
+
+    monkeypatch.setattr(
+        "readin.workbench.create_workbench_server",
+        lambda ledger_path, *, host, port: FakeServer(),
+    )
+
+    def open_browser(url: str, *, new: int) -> bool:
+        calls["browser"] = (url, new)
+        return True
+
+    monkeypatch.setattr("readin.workbench.webbrowser.open", open_browser)
+
+    serve_workbench("events.jsonl", host="127.0.0.1", port=0, open_browser=True)
+
+    assert calls == {
+        "browser": ("http://127.0.0.1:4317", 2),
+        "served": True,
+        "closed": True,
+    }
+    assert "READIN workbench · NO_AUTHORITY · http://127.0.0.1:4317" in capsys.readouterr().out
+
+
+def test_workbench_accepts_only_loopback_request_authorities(tmp_path: Path) -> None:
+    ledger = _phase5_ledger(tmp_path / "events.jsonl")
+    server = create_workbench_server(ledger.path, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    try:
+        authorities = (
+            f"localhost:{server.server_port}",
+            f"127.0.0.1:{server.server_port}",
+            f"[::1]:{server.server_port}",
+        )
+        for authority in authorities:
+            connection.request(
+                "GET",
+                f"/api/workbench?asset={ASSET_ID}",
+                headers={
+                    "Host": authority,
+                    "Origin": f"http://{authority}",
+                },
+            )
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+
+            assert response.status == 200
+            assert payload["selected_asset"]["identity"]["id"] == ASSET_ID
+            assert payload["authority"]["state"] == "NO_AUTHORITY"
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected_status", "expected_error"),
+    [
+        (["Host", "evil.example:{port}"], 421, "untrusted Host"),
+        (
+            ["Host", "127.0.0.1:{wrong_port}"],
+            421,
+            "Host port does not match listener",
+        ),
+        (["Host", "127.0.0.1:not-a-port"], 400, "malformed Host"),
+        ([], 400, "exactly one Host header is required"),
+        (
+            ["Host", "127.0.0.1:{port}", "Host", "localhost:{port}"],
+            400,
+            "exactly one Host header is required",
+        ),
+        (
+            ["Host", "127.0.0.1:{port}", "Origin", "https://evil.example"],
+            403,
+            "untrusted Origin",
+        ),
+        (
+            [
+                "Host",
+                "127.0.0.1:{port}",
+                "Origin",
+                "http://localhost:{wrong_port}",
+            ],
+            403,
+            "untrusted Origin",
+        ),
+        (
+            ["Host", "127.0.0.1:{port}", "Origin", "null"],
+            403,
+            "untrusted Origin",
+        ),
+        (
+            [
+                "Host",
+                "127.0.0.1:{port}",
+                "Origin",
+                "http://localhost:{port}",
+                "Origin",
+                "http://127.0.0.1:{port}",
+            ],
+            403,
+            "at most one Origin header is permitted",
+        ),
+    ],
+)
+def test_workbench_rejects_untrusted_host_and_origin_before_content(
+    tmp_path: Path,
+    headers: list[str],
+    expected_status: int,
+    expected_error: str,
+) -> None:
+    ledger = _phase5_ledger(tmp_path / "events.jsonl")
+    server = create_workbench_server(ledger.path, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    try:
+        formatted_headers = [
+            value.format(
+                port=server.server_port,
+                wrong_port=server.server_port + 1,
+            )
+            for value in headers
+        ]
+        connection.putrequest("GET", "/", skip_host=True)
+        for name, value in zip(formatted_headers[::2], formatted_headers[1::2], strict=True):
+            connection.putheader(name, value)
+        connection.endheaders()
+
+        response = connection.getresponse()
+        body = response.read()
+        payload = json.loads(body)
+
+        assert response.status == expected_status
+        assert payload == {
+            "error": expected_error,
+            "authority_state": "NO_AUTHORITY",
+        }
+        assert b"READIN Asset Workbench" not in body
+        assert response.getheader("Cache-Control") == "no-store"
+        assert response.getheader("Content-Security-Policy") == (
+            "default-src 'self'; script-src 'self'"
+        )
+        assert response.getheader("Referrer-Policy") == "no-referrer"
+        assert response.getheader("X-Content-Type-Options") == "nosniff"
+        assert response.getheader("X-Frame-Options") == "DENY"
     finally:
         connection.close()
         server.shutdown()

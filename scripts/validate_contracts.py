@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 
 from jsonschema import Draft202012Validator
 
 from readin.contracts import ContractViolation, load_event_schema, validate_event
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
+from readin.real_asset_cases import (
+    RealAssetPolicyError,
+    build_github_public_repository_policy,
+    load_real_asset_policy_schema,
+    validate_real_asset_case_policy,
+)
 from readin.residuals import ResidualRuntimeError, build_residual_snapshot
 from readin.synthetic import phase8_events, phase8g_events
 from readin.workbench import WorkbenchError, build_workbench_snapshot, validate_loopback_host
@@ -25,6 +32,23 @@ def _must_reject_contract(event: dict[str, object]) -> None:
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
+    policy_schema = load_real_asset_policy_schema()
+    Draft202012Validator.check_schema(policy_schema)
+    policy = build_github_public_repository_policy(
+        "InvariantDynamics",
+        "readin",
+        "Validate the bounded public repository policy contract.",
+        declared_at=datetime(2026, 9, 3, tzinfo=UTC),
+    )
+    validate_real_asset_case_policy(policy)
+    promoted_policy = deepcopy(policy)
+    promoted_policy["authority"]["collection"] = "UNRESTRICTED"
+    try:
+        validate_real_asset_case_policy(promoted_policy)
+    except RealAssetPolicyError:
+        pass
+    else:
+        raise AssertionError("real-asset policy authority promotion was accepted")
     events = phase8g_events()
     residual_events = phase8_events()
     for event in events:
@@ -182,6 +206,15 @@ def main() -> None:
         pass
     else:
         raise AssertionError("semantic negative vector was accepted")
+
+    invalid_access_scope = deepcopy(events[4])
+    invalid_access_scope["payload"]["observation"]["epistemic"]["access_scope"] = "LICENSED"
+    try:
+        ReadinProjection.replay([*events[:4], invalid_access_scope])
+    except ProjectionError:
+        pass
+    else:
+        raise AssertionError("observation epistemic access-scope drift was accepted")
 
     invalid_dependency = deepcopy(events[10])
     invalid_dependency["payload"]["dependency"]["ancestor_evidence_id"] = (
@@ -640,9 +673,9 @@ def main() -> None:
         raise AssertionError("workbench accepted a non-loopback host")
 
     print(
-        f"PASS schemas=1 positive_events={len(events)} "
+        f"PASS schemas=2 positive_events={len(events)} "
         f"residual_fixture_events={len(residual_events)} "
-        f"negative_contract_vectors=27 negative_semantic_vectors=27 "
+        f"negative_contract_vectors=27 negative_semantic_vectors=28 "
         f"tracked_assets={len(projection.assets)} "
         f"claims={len(projection.claims)} relations={len(projection.relations)} "
         f"resolution_candidates={len(projection.resolution_candidates)} "
@@ -662,7 +695,7 @@ def main() -> None:
         f"forecast_validity_assessments={len(projection.forecast_validity_assessments)} "
         f"forecast_fitter_specifications={len(projection.forecast_fitter_specifications)} "
         f"residual_readbacks={len(projection.residual_readbacks)} "
-        "workbench_contracts=1 negative_workbench_vectors=2"
+        "workbench_contracts=1 negative_workbench_vectors=2 real_asset_policy_vectors=2"
     )
 
 

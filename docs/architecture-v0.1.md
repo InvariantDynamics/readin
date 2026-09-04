@@ -395,8 +395,12 @@ The representation is intentionally simple enough to inspect and replay. It is n
 event log, database, or service.
 
 Raw source artifacts are represented by immutable evidence manifests with SHA-256 identity, media
-type, byte size, source, license, access policy, transformations, and derivative references. Binary
-artifact storage and live acquisition are later gated work.
+type, byte size, source, license, access policy, transformations, and derivative references. The
+manual and synthetic path does not store artifact bytes. Experimental real-asset H0 adds a separate,
+case-local content-addressed vault and exactly one policy-bound public GitHub repository metadata
+request. That narrow path does not create a general acquisition layer, credential store, parser,
+crawler, or person-targeting/profile capability. Its raw source and narrow projection can include
+incidental public repository-owner account metadata as documented in ADR 0017.
 
 ## Planned slices
 
@@ -425,6 +429,17 @@ artifact storage and live acquisition are later gated work.
    calibrated forecast models are not implemented. Phase 8G prospective fitter specification is
    also implemented, while training, future-design selection, validation-corpus scoring,
    uncertainty estimation, and updates remain unimplemented.)*
+10. **Real-asset H0** — one credential-free, exact-target public GitHub repository metadata
+acquisition with a digest-bound case policy, owner-only evidence vault, immutable receipt,
+repository-only projection, bounded coverage, and `NO_AUTHORITY`. Authenticated accounts,
+people research, crawling, repeated monitoring, and external action remain unimplemented.
+    The read-only workbench adds a case-first projection only after the complete
+    policy-marker-receipt-artifact-manifest-observation read gate succeeds. It presents the declared
+    purpose, target and source limits, consumed budgets, retention review, minimization exclusions,
+    custody checks, admitted observation, and source manifest without adding a write or acquisition
+    endpoint.
+    Its 15-second aggregate adapter budget prevents late admission but cannot preempt synchronous
+    resolver or HTTP-header work in-process. *(implemented experimentally; see ADR 0017)*
 
 Each slice requires its own contract, positive and negative fixtures, validation path, claim ceiling,
 and stop conditions.

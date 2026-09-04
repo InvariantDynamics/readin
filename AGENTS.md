@@ -28,7 +28,9 @@ not OFS Core and must not redefine OFS.
 
 ## Current slice
 
-The Phase 0 through bounded Phase 8G slices are local-first and manual-input only:
+The Phase 0 through bounded Phase 8G slices are local-first and manual-input only. The separately
+bounded experimental real-asset H0 slice adds one user-invoked, credential-free public-repository
+metadata request:
 
 - typed tracked-asset creation;
 - observer-frame registration;
@@ -90,9 +92,11 @@ The Phase 0 through bounded Phase 8G slices are local-first and manual-input onl
 - deterministic asset-state replay;
 - schema validation and fail-closed referential checks.
 
-No live adapters, credentials, network acquisition, entity merge, automated claim
-extraction, learned or external forecast model, external database, service deployment, or autonomous
-action exists in this slice. Resolution assessments never mutate canonical entity identity. Claims,
+Except for H0's exact-target public GitHub repository metadata request, no live adapters, credentials,
+network acquisition, entity merge, automated claim extraction, learned or external forecast model,
+external database, service deployment, or autonomous action exists in this slice. The H0 connector
+does not accept credentials, URLs, person targets, redirects, retries, schedules, or relationship
+traversal. Resolution assessments never mutate canonical entity identity. Claims,
 relations, candidate dispositions, surfaces, and query plans are manually recorded epistemic
 objects, not machine truth determinations. A cartographic result never establishes source coverage
 or completeness, and execution cannot access the network. Reference fitter outputs are local
