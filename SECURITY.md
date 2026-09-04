@@ -61,6 +61,17 @@ secret detector. Source files are not copied or deleted, and retention days are 
 Only user-managed raw retention is supported. Batch validation precedes all writes under one lock;
 filesystem crashes can still truncate JSONL. No native archive extraction or provider access occurs.
 
+H4 adds bounded native-file parsing. LinkedIn ZIP input is capped at 64 MiB and 2048 members; only
+one Profile.csv member is decompressed in memory, with a 1 MiB limit and 100:1 compression-ratio cap.
+No member is extracted. Unsafe paths, symbolic links, ambiguous profile members, encrypted selected
+members, and unsupported compression fail closed. CSV admission selects first/last names only;
+other columns and unrelated ZIP member contents do not enter the ledger. A profile's association
+with a catalog account is user-attested, not authenticated by its name. Saved public GitHub JSON
+uses exact repository identity/visibility validation and a closed field set; local import never
+invokes the network collector or claims its HTTP provenance. H3's private-file and grant controls
+also govern H4. Capability/readiness labels do not establish file validity, source coverage, a
+connected account, or live synchronization.
+
 The loopback workbench has no authentication. It accepts only numeric `127.0.0.1` or `::1` listener
 bindings, verifies the bound socket is loopback, validates `Host` and `Origin`, and refuses mutation
 methods, but should still be treated as a same-user local presentation surface.

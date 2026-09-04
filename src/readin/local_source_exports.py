@@ -102,7 +102,10 @@ def _reject_constant(value: str) -> None:
     raise LocalSourceExportError("non-finite JSON values are prohibited")
 
 
-def load_local_source_export(path: str | Path) -> tuple[JsonObject, str, int]:
+def read_private_source_bytes(
+    path: str | Path, *, max_bytes: int = MAX_LOCAL_SOURCE_EXPORT_BYTES
+) -> bytes:
+    """Read one bounded private source, without interpreting or retaining its path."""
     path = _absolute_local_path(path)
     _reject_symlink_components(path, "local export")
     _reject_git_checkout_path(path, "local export")
@@ -112,8 +115,8 @@ def load_local_source_export(path: str | Path) -> tuple[JsonObject, str, int]:
             raise LocalSourceExportError("local export must be a regular file")
         if stat.S_IMODE(before.st_mode) & 0o077 or before.st_uid != os.geteuid():
             raise LocalSourceExportError("local export must be owner-only and owned by this user")
-        if before.st_size > MAX_LOCAL_SOURCE_EXPORT_BYTES:
-            raise LocalSourceExportError("local export exceeds 1 MiB")
+        if before.st_size > max_bytes:
+            raise LocalSourceExportError(f"local export exceeds {max_bytes} bytes")
         flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
         descriptor = os.open(path, flags)
         with os.fdopen(descriptor, "rb") as stream:
@@ -125,7 +128,7 @@ def load_local_source_export(path: str | Path) -> tuple[JsonObject, str, int]:
                 or opened.st_uid != os.geteuid()
             ):
                 raise LocalSourceExportError("local export changed while opening")
-            raw = stream.read(MAX_LOCAL_SOURCE_EXPORT_BYTES + 1)
+            raw = stream.read(max_bytes + 1)
             after = os.fstat(stream.fileno())
             if (opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns) != (
                 after.st_size,
@@ -135,8 +138,13 @@ def load_local_source_export(path: str | Path) -> tuple[JsonObject, str, int]:
                 raise LocalSourceExportError("local export changed while reading")
     except OSError as error:
         raise LocalSourceExportError("could not read private local export") from error
-    if len(raw) > MAX_LOCAL_SOURCE_EXPORT_BYTES:
-        raise LocalSourceExportError("local export exceeds 1 MiB")
+    if len(raw) > max_bytes:
+        raise LocalSourceExportError(f"local export exceeds {max_bytes} bytes")
+    return raw
+
+
+def load_local_source_export(path: str | Path) -> tuple[JsonObject, str, int]:
+    raw = read_private_source_bytes(path)
     try:
         source = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_strict_object, parse_constant=_reject_constant
@@ -152,7 +160,13 @@ def _id(kind: str, *parts: object) -> str:
 
 
 def _matching_grant(
-    source: JsonObject, projection: ReadinProjection
+    source: JsonObject,
+    projection: ReadinProjection,
+    *,
+    asset_class: str = "SOCIAL_ACCOUNT",
+    data_category: str = "ACCOUNT_PROFILE_METADATA",
+    observation_type: str = "social.profile_metadata",
+    validate_profile: bool = True,
 ) -> tuple[JsonObject, JsonObject]:
     matches = []
     for observation in projection.observations.values():
@@ -177,8 +191,8 @@ def _matching_grant(
     for field in ("catalog_id", "asset_key", "asset_class", "platform", "account_identifier"):
         if grant.get(field) != binding.get(field) or field not in binding:
             raise LocalSourceExportError("grant does not match current catalog binding")
-    if binding["asset_class"] != "SOCIAL_ACCOUNT":
-        raise LocalSourceExportError("this parser requires a SOCIAL_ACCOUNT asset")
+    if binding["asset_class"] != asset_class:
+        raise LocalSourceExportError(f"this parser requires a {asset_class} asset")
     if binding["collection_mode"] not in {
         "LOCAL_EXPORT_IMPORT_ONLY",
         "API_CONNECTION_REQUIRES_SEPARATE_GRANT",
@@ -282,7 +296,7 @@ def _matching_grant(
         s
         for s in grant.get("scopes", [])
         if (
-            s.get("data_category") == "ACCOUNT_PROFILE_METADATA"
+            s.get("data_category") == data_category
             and s.get("minimization") == "MINIMUM_NECESSARY"
             and s.get("private_counterparty_data") == "EXCLUDED"
             and s.get("claim_extraction") == "PROHIBITED"
@@ -292,16 +306,14 @@ def _matching_grant(
         o
         for o in grant.get("allowed_observation_types", [])
         if (
-            o.get("observation_type") == "social.profile_metadata"
+            o.get("observation_type") == observation_type
             and o.get("admission_state") == "CONTRACTED_NOT_ENABLED"
             and o.get("claim_extraction") == "PROHIBITED"
             and o.get("external_action_state") == "PROHIBITED"
         )
     ]
     if not eligible_scopes or len(outputs) != 1:
-        raise LocalSourceExportError(
-            "grant must contract account profile metadata scope and output"
-        )
+        raise LocalSourceExportError("grant must contract the parser's metadata scope and output")
     evidence = projection.evidence[observation["source_artifact_id"]]
     frame = projection.frames[observation["observer_frame_id"]]
     expected_uri = (
@@ -317,7 +329,7 @@ def _matching_grant(
         or grant.get("catalog_source_digest_sha256") != binding["source_digest_sha256"]
     ):
         raise LocalSourceExportError("grant evidence digest mismatch")
-    for row in source["observations"]:
+    for row in source["observations"] if validate_profile else []:
         record = row["structured_payload"]
         if any(record[field] != binding[field] for field in ("platform", "account_identifier")):
             raise LocalSourceExportError("profile record does not match the catalog account")

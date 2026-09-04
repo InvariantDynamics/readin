@@ -28,6 +28,12 @@ from readin.local_source_exports import (
     load_local_source_export_schema,
     validate_local_source_export,
 )
+from readin.native_source_exports import (
+    NativeSourceExportError,
+    load_native_source_record_schema,
+    parse_native_source,
+    validate_native_source_record,
+)
 from readin.projection import ProjectionError, ReadinProjection
 from readin.real_asset_cases import (
     RealAssetPolicyError,
@@ -214,6 +220,31 @@ def main() -> None:
     connector_grant_schema = load_connector_grant_source_schema()
     Draft202012Validator.check_schema(connector_grant_schema)
     Draft202012Validator.check_schema(load_local_source_export_schema())
+    Draft202012Validator.check_schema(load_native_source_record_schema())
+    native_record = parse_native_source(
+        b"First Name,Last Name,Address\nExample,Operator,excluded\n",
+        "LINKEDIN_PROFILE_CSV",
+        {"asset_class": "SOCIAL_ACCOUNT", "platform": "LinkedIn"},
+    )
+    validate_native_source_record(native_record)
+    if native_record["record"] != {"display_name": "Example Operator"}:
+        raise AssertionError("native profile parser admitted unexpected fields")
+    invalid_native = deepcopy(native_record)
+    invalid_native["record"]["address"] = "excluded"
+    try:
+        validate_native_source_record(invalid_native)
+    except NativeSourceExportError:
+        pass
+    else:
+        raise AssertionError("native contract accepted an excluded field")
+    invalid_native = deepcopy(native_record)
+    invalid_native["identity_binding"] = "VERIFIED"
+    try:
+        validate_native_source_record(invalid_native)
+    except NativeSourceExportError:
+        pass
+    else:
+        raise AssertionError("native contract accepted an authenticated identity claim")
     asset_catalog_source = _asset_catalog_source()
     validate_asset_catalog_source(asset_catalog_source)
     promoted_catalog = deepcopy(asset_catalog_source)
@@ -1003,7 +1034,7 @@ def main() -> None:
         raise AssertionError("workbench accepted a non-loopback host")
 
     print(
-        f"PASS schemas=5 positive_events={len(events)} "
+        f"PASS schemas=6 positive_events={len(events)} "
         f"asset_catalog_events={len(asset_catalog_events)} "
         f"connector_grant_events={len(connector_grant_events)} "
         f"local_source_export_events={len(local_source_export_events)} "
@@ -1030,7 +1061,8 @@ def main() -> None:
         f"residual_readbacks={len(projection.residual_readbacks)} "
         "workbench_contracts=1 negative_workbench_vectors=2 "
         "real_asset_policy_vectors=2 asset_catalog_policy_vectors=2 "
-        "connector_grant_policy_vectors=2 local_source_export_policy_vectors=2"
+        "connector_grant_policy_vectors=2 local_source_export_policy_vectors=2 "
+        "native_source_records=1 native_source_policy_vectors=2"
     )
 
 

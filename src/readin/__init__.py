@@ -85,6 +85,12 @@ from readin.local_source_exports import (
     load_local_source_export_schema,
     validate_local_source_export,
 )
+from readin.native_source_exports import (
+    NativeSourceExportError,
+    import_native_source_export,
+    parse_native_source,
+    prepare_native_source_grant,
+)
 from readin.projection import ProjectionError, ReadinProjection
 from readin.readback_selection import (
     ReadbackSelectionError,
@@ -97,6 +103,7 @@ from readin.scenarios import (
     create_bounded_scenario,
     execute_scenario,
 )
+from readin.source_capabilities import build_source_capabilities
 from readin.store import EventLedger, LedgerError
 from readin.workbench import WorkbenchError, build_workbench_snapshot, create_workbench_server
 
@@ -118,6 +125,11 @@ __all__ = [
     "ReadbackSelectionError",
     "LedgerError",
     "LocalSourceExportError",
+    "NativeSourceExportError",
+    "import_native_source_export",
+    "parse_native_source",
+    "prepare_native_source_grant",
+    "build_source_capabilities",
     "build_local_source_export_events",
     "import_local_source_export",
     "load_local_source_export",

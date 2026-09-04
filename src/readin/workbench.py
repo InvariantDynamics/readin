@@ -15,8 +15,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from readin.connector_grants import CONNECTOR_GRANT_OBSERVATION_TYPE
-from readin.local_source_exports import LOCAL_SOURCE_EXPORT_ADAPTER
 from readin.projection import ProjectionError, ReadinProjection
+from readin.source_capabilities import IMPORTED_SOURCE_ADAPTERS, build_source_capabilities
 from readin.store import EventLedger, LedgerError
 
 WORKBENCH_SCHEMA_VERSION = "readin.workbench.v0.1"
@@ -181,7 +181,7 @@ def _latest_connector_grant(observations: list[dict[str, Any]]) -> dict[str, Any
 def _source_export_summaries(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     batches: dict[str, dict[str, Any]] = {}
     for observation in observations:
-        if observation["provenance"]["adapter"] != LOCAL_SOURCE_EXPORT_ADAPTER:
+        if observation["provenance"]["adapter"] not in IMPORTED_SOURCE_ADAPTERS:
             continue
         receipt = observation["content"]["structured_payload"].get("source_export")
         if not isinstance(receipt, dict) or not isinstance(receipt.get("export_id"), str):
@@ -193,6 +193,11 @@ def _source_export_summaries(observations: list[dict[str, Any]]) -> list[dict[st
                 "grant_id": receipt.get("grant_id"),
                 "source_sha256": receipt.get("source_sha256"),
                 "source_size": receipt.get("source_size"),
+                "parser": receipt.get("parser"),
+                "identity_binding": receipt.get("identity_binding"),
+                "selected_source_fields": receipt.get("selected_source_fields", []),
+                "excluded_field_count": receipt.get("excluded_field_count"),
+                "archive_entries_skipped": receipt.get("archive_entries_skipped"),
                 "expected_observation_count": receipt.get("observation_count"),
                 "observation_count": 0,
                 "observation_ids": [],
@@ -1225,6 +1230,11 @@ def build_workbench_snapshot(
         for observation in projection.observations.values()
         if observation["provenance"]["adapter"] == "github-public-rest"
     ]
+    local_source_observations = [
+        observation
+        for observation in projection.observations.values()
+        if observation["provenance"]["adapter"] in IMPORTED_SOURCE_ADAPTERS
+    ]
     selected_id = asset_id or (catalog[0]["id"] if catalog else None)
     if selected_id is not None and selected_id not in projection.assets:
         raise WorkbenchError(f"unknown tracked asset: {selected_id}")
@@ -1242,6 +1252,7 @@ def build_workbench_snapshot(
             "writes": "DISABLED",
         },
         "asset_catalog": _asset_catalog_workbench_summary(catalog),
+        "source_capabilities": build_source_capabilities(projection),
         "case": None,
         "epistemic_limits": {
             "coverage_state": "NOT_ESTABLISHED",
@@ -1256,11 +1267,17 @@ def build_workbench_snapshot(
             "empirical_validity_state": "NOT_ESTABLISHED",
             "consensus_state": "NOT_COMPUTED",
             "collection_state": (
-                "RECORDED_USER_INVOKED_ONE_SHOT" if recorded_source_observations else "NOT_STARTED"
+                "RECORDED_USER_INVOKED_ONE_SHOT"
+                if recorded_source_observations
+                else "RECORDED_LOCAL_IMPORT"
+                if local_source_observations
+                else "NOT_STARTED"
             ),
             "acquisition_state": (
                 "PUBLIC_SOURCE_ARTIFACT_ADMISSION_RECORDED"
                 if recorded_source_observations
+                else "LOCAL_SOURCE_IMPORT_RECORDED"
+                if local_source_observations
                 else "NOT_ATTEMPTED"
             ),
             "source_independence_state": "NOT_ESTABLISHED",

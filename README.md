@@ -545,11 +545,85 @@ uv run readin workbench \
 Preview performs all import checks without writing. Admission returns a receipt with source
 SHA-256, record count, and observation IDs. Identical retries return `ALREADY_IMPORTED` without
 duplicating observations. Refresh the workbench: **Setup → Imported source records** shows the
-receipt; **Evidence → Imported profile records** shows the values and evidence identities.
+receipt; **Evidence → Imported source records** shows the values and evidence identities.
 
 The source stays under your control; READIN does not copy or delete it. Declared retention days
 are not an automated expiration mechanism, and admitted observations remain in the ledger.
 See [ADR 0020](docs/adr/0020-local-source-export-observation-import.md) for the exact contract.
+
+## Native files and source coverage (H4)
+
+READIN now accepts these native file layouts without a prepared READIN observation JSON:
+
+| Parser | Input | Selected output |
+| --- | --- | --- |
+| `LINKEDIN_PROFILE_CSV` | UTF-8 Profile.csv with First Name / Last Name headers and one row | Display name |
+| `LINKEDIN_PROFILE_ZIP` | ZIP containing exactly one Profile.csv | Same profile fields; other members are skipped |
+| `GITHUB_REPOSITORY_JSON` | Saved public repository REST response | Repository identity, visibility, flags, branch, language, star/fork/issue counts when present |
+
+These formats are covered by synthetic fixture tests. An actual provider export must match the
+documented layout; other locales, shapes, and future changes may need a parser update.
+
+The **Sources** tab shows all 11 asset classes, available formats for the selected account,
+compatible grants, and how many assets actually have imported records. This is also available as:
+
+```shell
+uv run readin list-source-capabilities --ledger "/absolute/path/to/events.jsonl"
+```
+
+For a cataloged LinkedIn account, prepare a local-export grant without writing the manifest by
+hand. Replace the ledger and asset ID, and choose a new private output filename outside Git:
+
+```shell
+umask 077
+uv run readin prepare-native-source-grant \
+  --ledger "/absolute/path/to/events.jsonl" \
+  --asset "your-catalog-asset-id" \
+  --parser LINKEDIN_PROFILE_ZIP > "/private/local/path/linkedin-grant.json"
+
+uv run readin record-connector-grant \
+  --ledger "/absolute/path/to/events.jsonl" \
+  --manifest "/private/local/path/linkedin-grant.json" --attest
+```
+
+Review the generated manifest before recording it. Generation itself changes no ledger state and
+does not attest provider terms. Use the `grant_id` returned by the recording command below. The
+CSV and ZIP parsers share a profile metadata scope, so one compatible local-export grant can cover
+either form. An existing OAuth-readiness grant cannot substitute for a local-export grant.
+
+Download your own export using [LinkedIn's data download flow](https://www.linkedin.com/help/linkedin/answer/a1339364/downloading-your-account-data).
+Move the chosen file to a private local folder outside Git and cloud sync, and make it owner-only
+with `chmod 600 "/private/local/path/linkedin-export.zip"`. Preview it:
+
+```shell
+uv run readin import-native-source-export \
+  --ledger "/absolute/path/to/events.jsonl" \
+  --asset "your-catalog-asset-id" \
+  --grant "your-recorded-local-export-grant-id" \
+  --parser LINKEDIN_PROFILE_ZIP \
+  --source "/private/local/path/linkedin-export.zip" \
+  --observed-at "2026-09-04T09:00:00-05:00" \
+  --preview
+```
+
+Set `--observed-at` to the observation/export time you are attesting. Preview returns the exact
+selected record, original file hash, member hash for ZIP, selected fields, exclusion counts, and
+identity-binding status. After reviewing, replace `--preview` with `--attest` to admit it. Refresh
+the workbench's Sources, Setup, and Evidence tabs. Identical retries with the same observation time
+do not duplicate records. The original file is neither copied nor deleted.
+
+For GitHub, use `GITHUB_REPOSITORY_JSON` with a `SOFTWARE_REPOSITORY` catalog asset, platform GitHub,
+`account_identifier` set to `owner/repository`, and the matching repository HTML URL. The generated
+grant selects `OWNED_REPOSITORY_METADATA` and `github.public_repository_metadata.imported`.
+The file must be a saved public [Get a repository response](https://docs.github.com/en/rest/repos/repos#get-a-repository);
+this command does not call GitHub, authenticate the file's origin, or import private repositories.
+
+**Operational coverage:** H4 supports the listed social-profile and repository formats. Email,
+calendar, financial accounts, documents, devices, and other classes are catalogable but do not yet
+have native importers. Account login, synchronization, and monitoring are not implemented. The
+existing H0 exact-target public repository request remains a separate case-policy workflow.
+See [ADR 0021](docs/adr/0021-native-export-parsers-and-source-coverage.md) for field boundaries,
+archive limits, provenance, and the path toward broader source coverage.
 
 ## Quick start
 

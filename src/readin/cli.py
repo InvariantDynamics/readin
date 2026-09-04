@@ -57,6 +57,11 @@ from readin.forecasting import (
     execute_frozen_forecast_baseline,
 )
 from readin.local_source_exports import import_local_source_export
+from readin.native_source_exports import (
+    PARSERS,
+    import_native_source_export,
+    prepare_native_source_grant,
+)
 from readin.projection import ProjectionError
 from readin.readback_selection import (
     ReadbackSelectionError,
@@ -77,6 +82,7 @@ from readin.scenarios import (
     create_bounded_scenario,
     execute_scenario,
 )
+from readin.source_capabilities import build_source_capabilities
 from readin.store import EventLedger, LedgerError
 from readin.workbench import (
     WorkbenchError,
@@ -230,6 +236,40 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Attest self/controlled profile data with credentials and counterparty data excluded",
     )
     export_parser.add_argument("--occurred-at")
+
+    native_parser = subparsers.add_parser(
+        "import-native-source-export",
+        help="Preview or import a native LinkedIn profile or saved GitHub repository export",
+    )
+    _add_ledger_argument(native_parser)
+    native_parser.add_argument("--source", required=True)
+    native_parser.add_argument("--parser", required=True, choices=sorted(PARSERS))
+    native_parser.add_argument("--asset", required=True)
+    native_parser.add_argument("--grant", required=True)
+    native_parser.add_argument(
+        "--observed-at",
+        required=True,
+        help="Operator-declared export observation time with UTC offset",
+    )
+    native_parser.add_argument("--preview", action="store_true")
+    native_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help="Attest source belongs to the selected self/controlled asset",
+    )
+    native_parser.add_argument("--occurred-at")
+    capabilities_parser = subparsers.add_parser(
+        "list-source-capabilities",
+        help="Show parser support, grant readiness, and actual imported source coverage",
+    )
+    _add_ledger_argument(capabilities_parser)
+    template_parser = subparsers.add_parser(
+        "prepare-native-source-grant",
+        help="Print a reviewable local export grant manifest for an existing catalog asset",
+    )
+    _add_ledger_argument(template_parser)
+    template_parser.add_argument("--asset", required=True)
+    template_parser.add_argument("--parser", required=True, choices=sorted(PARSERS))
 
     entity_parser = subparsers.add_parser(
         "create-entity", help="Create and optionally track an entity"
@@ -910,6 +950,22 @@ def _run(args: argparse.Namespace) -> Any:
         }
 
     ledger = _ledger(args)
+    if args.command == "list-source-capabilities":
+        return build_source_capabilities(ledger.projection())
+    if args.command == "prepare-native-source-grant":
+        return prepare_native_source_grant(ledger.projection(), args.asset, args.parser)
+    if args.command == "import-native-source-export":
+        return import_native_source_export(
+            ledger,
+            args.source,
+            parser=args.parser,
+            asset_id=args.asset,
+            grant_id=args.grant,
+            observed_at=args.observed_at,
+            preview=args.preview,
+            attested=args.attest,
+            occurred_at=args.occurred_at,
+        )
     if args.command == "import-local-source-export":
         return import_local_source_export(
             ledger,
