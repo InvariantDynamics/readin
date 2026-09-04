@@ -11,6 +11,7 @@ from typing import Any
 
 from readin.asset_catalog import AssetCatalogError, import_asset_catalog_source
 from readin.belief import BeliefRuntimeError, execute_belief_revision
+from readin.connector_grants import ConnectorGrantError, import_connector_grant_source
 from readin.contracts import ContractViolation
 from readin.discrimination import (
     DiscriminationRuntimeError,
@@ -196,6 +197,22 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     asset_catalog_parser.add_argument("--occurred-at")
+
+    connector_grant_parser = subparsers.add_parser(
+        "record-connector-grant",
+        help="Record a private local connector grant manifest without enabling live collection",
+    )
+    _add_ledger_argument(connector_grant_parser)
+    connector_grant_parser.add_argument("--manifest", required=True)
+    connector_grant_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help=(
+            "Attest the grant is limited to self/controlled assets and authorizes no "
+            "live collection"
+        ),
+    )
+    connector_grant_parser.add_argument("--occurred-at")
 
     entity_parser = subparsers.add_parser(
         "create-entity", help="Create and optionally track an entity"
@@ -883,6 +900,13 @@ def _run(args: argparse.Namespace) -> Any:
             attested=args.attest,
             occurred_at=args.occurred_at,
         )
+    if args.command == "record-connector-grant":
+        return import_connector_grant_source(
+            ledger,
+            args.manifest,
+            attested=args.attest,
+            occurred_at=args.occurred_at,
+        )
 
     if args.command == "init":
         ledger.initialize()
@@ -1380,6 +1404,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     except (
         AssetCatalogError,
+        ConnectorGrantError,
         ContractViolation,
         DiscriminationRuntimeError,
         BeliefRuntimeError,

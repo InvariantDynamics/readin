@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from readin.connector_grants import CONNECTOR_GRANT_OBSERVATION_TYPE
 from readin.projection import ProjectionError, ReadinProjection
 from readin.store import EventLedger, LedgerError
 
@@ -122,6 +123,58 @@ def _connector_intent(binding: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     connector = binding.get("connector_intent")
     return connector if isinstance(connector, dict) else None
+
+
+def _connector_grant_payload(observation: dict[str, Any]) -> dict[str, Any] | None:
+    if observation["observation_type"] != CONNECTOR_GRANT_OBSERVATION_TYPE:
+        return None
+    payload = observation["content"]["structured_payload"]
+    grant = payload.get("connector_grant") if isinstance(payload, dict) else None
+    return grant if isinstance(grant, dict) else None
+
+
+def _latest_connector_grant(observations: list[dict[str, Any]]) -> dict[str, Any] | None:
+    grants = [
+        {"observation": observation, "grant": grant}
+        for observation in observations
+        if (grant := _connector_grant_payload(observation)) is not None
+    ]
+    if not grants:
+        return None
+    item = grants[-1]
+    grant = item["grant"]
+    observation = item["observation"]
+    return {
+        "observation_id": observation["id"],
+        "source_artifact_id": observation["source_artifact_id"],
+        "observed_at": observation["observed_at"],
+        "grant_id": grant["grant_id"],
+        "grant_kind": grant["grant"]["grant_kind"],
+        "grant_state": grant["grant"]["grant_state"],
+        "access_mode": grant["grant"]["access_mode"],
+        "connector_kind": grant["provider"]["connector_kind"],
+        "connector_name": grant["provider"]["connector_name"],
+        "connector_version": grant["provider"]["connector_version"],
+        "terms_review_state": grant["provider"]["terms_review_state"],
+        "scope_count": len(grant["scopes"]),
+        "allowed_observation_type_count": len(grant["allowed_observation_types"]),
+        "scopes": deepcopy(grant["scopes"]),
+        "allowed_observation_types": deepcopy(grant["allowed_observation_types"]),
+        "retention": deepcopy(grant["retention"]),
+        "revocation": deepcopy(grant["revocation"]),
+        "audit": deepcopy(grant["audit"]),
+        "authority_state": grant["authority_state"],
+        "collection_state": grant["collection_state"],
+        "credential_material": grant["credential_material"],
+        "credential_storage": grant["credential_storage"],
+        "oauth_state": grant["oauth_state"],
+        "live_collection_state": grant["live_collection_state"],
+        "network_access": grant["network_access"],
+        "external_action_state": grant["external_action_state"],
+        "people_targeting": grant["people_targeting"],
+        "activation_requirement": grant["activation_requirement"],
+        "source_digest_sha256": grant["source_digest_sha256"],
+    }
 
 
 def _catalog_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -478,6 +531,7 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
     real_asset_case_binding = entity["attributes"].get("real_asset_case_binding")
     asset_catalog_binding = _asset_catalog_binding(entity)
     connector_intent = _connector_intent(asset_catalog_binding)
+    latest_connector_grant = _latest_connector_grant(view["observations"])
     tracked = view["tracked_asset"]
     observation_count_by_frame: dict[str, int] = {}
     for observation in view["observations"]:
@@ -973,6 +1027,7 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             ),
             "asset_catalog_binding": deepcopy(asset_catalog_binding),
             "connector_intent": deepcopy(connector_intent),
+            "connector_grant": deepcopy(latest_connector_grant),
             "source_setup": (
                 {
                     "asset_class": asset_catalog_binding["asset_class"],
@@ -992,6 +1047,21 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
                     "source_digest_sha256": asset_catalog_binding["source_digest_sha256"],
                     "owner_attestation": asset_catalog_binding["ownership_attestation"],
                     "people_targeting": asset_catalog_binding["authority"]["people_targeting"],
+                    "connector_grant_state": (
+                        latest_connector_grant["grant_state"]
+                        if latest_connector_grant is not None
+                        else "NOT_RECORDED"
+                    ),
+                    "connector_grant_id": (
+                        latest_connector_grant["grant_id"]
+                        if latest_connector_grant is not None
+                        else None
+                    ),
+                    "connector_grant_access_mode": (
+                        latest_connector_grant["access_mode"]
+                        if latest_connector_grant is not None
+                        else None
+                    ),
                 }
                 if asset_catalog_binding is not None and connector_intent is not None
                 else None

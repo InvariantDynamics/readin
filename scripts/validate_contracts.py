@@ -13,6 +13,13 @@ from readin.asset_catalog import (
     load_asset_catalog_source_schema,
     validate_asset_catalog_source,
 )
+from readin.connector_grants import (
+    CONNECTOR_GRANT_OBSERVATION_TYPE,
+    ConnectorGrantContractError,
+    build_connector_grant_events,
+    load_connector_grant_source_schema,
+    validate_connector_grant_source,
+)
 from readin.contracts import ContractViolation, load_event_schema, validate_event
 from readin.fitters import canonical_sha256
 from readin.projection import ProjectionError, ReadinProjection
@@ -88,6 +95,109 @@ def _asset_catalog_source() -> dict[str, object]:
     }
 
 
+def _connector_grant_source(projection: ReadinProjection) -> dict[str, object]:
+    item = projection.catalog_view()[0]
+    entity = item["entity"]
+    binding = entity["attributes"]["asset_catalog_binding"]
+    return {
+        "schema_version": "readin.connector-grant-source.v0.1",
+        "grant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "declared_at": "2026-09-04T12:05:00Z",
+        "owner": {
+            "label": "Local operator",
+            "attestation": "USER_ATTESTED_NOT_VERIFIED",
+            "scope": "SELF_OR_CONTROLLED_ASSETS_ONLY",
+        },
+        "asset": {
+            "entity_id": entity["id"],
+            "catalog_id": binding["catalog_id"],
+            "asset_key": binding["asset_key"],
+            "asset_class": binding["asset_class"],
+            "platform": binding["platform"],
+            "account_identifier": binding["account_identifier"],
+        },
+        "provider": {
+            "platform": binding["platform"],
+            "connector_kind": "OAUTH_API",
+            "connector_name": "Example read-only profile setup",
+            "connector_version": "0.0.0-contract-only",
+            "terms_review_state": "REQUIRES_REVIEW",
+            "terms_reference_uri": "https://social.example/legal/terms",
+        },
+        "purpose": {
+            "kind": "CONNECTOR_READINESS_ASSESSMENT",
+            "statement": "Validate connector grant recording without live collection.",
+            "secondary_use": "PROHIBITED",
+        },
+        "grant": {
+            "grant_kind": "OAUTH_API_REQUIRES_SEPARATE_TOKEN_FLOW",
+            "grant_state": "RECORDED_NOT_ACTIVE",
+            "authorization_basis": binding["authorization_basis"],
+            "access_mode": "API_CONNECTION_REQUIRES_SEPARATE_TOKEN_FLOW",
+            "collection_state": "NOT_STARTED",
+            "credential_material": "ABSENT",
+            "credential_storage": "PROHIBITED",
+            "oauth_state": "NOT_REQUESTED",
+            "live_collection_state": "DISABLED",
+            "network_access": False,
+            "external_action_state": "PROHIBITED",
+            "people_targeting": "PROHIBITED",
+            "activation_requirement": "SEPARATE_EXPLICIT_CONNECTOR_GRANT_REQUIRED",
+        },
+        "authority": {
+            "state": "NO_AUTHORITY",
+            "collection": "NOT_STARTED",
+            "external_actions": "PROHIBITED",
+            "credential_storage": "PROHIBITED",
+            "network_access": False,
+            "people_targeting": "PROHIBITED",
+        },
+        "source": {
+            "kind": "USER_DECLARED_LOCAL_GRANT_MANIFEST",
+            "network_access": False,
+            "credential_material": "ABSENT",
+            "path_retention": "NOT_RECORDED_IN_LEDGER",
+        },
+        "scopes": [
+            {
+                "scope_name": "profile_metadata",
+                "source_surface": "Self profile metadata",
+                "data_category": "ACCOUNT_PROFILE_METADATA",
+                "access_intent": "READ_ONLY_IF_SEPARATELY_ENABLED",
+                "minimization": "MINIMUM_NECESSARY",
+                "private_counterparty_data": "EXCLUDED",
+                "claim_extraction": "PROHIBITED",
+            }
+        ],
+        "allowed_observation_types": [
+            {
+                "observation_type": "social.profile_metadata",
+                "admission_state": "CONTRACTED_NOT_ENABLED",
+                "claim_extraction": "PROHIBITED",
+                "external_action_state": "PROHIBITED",
+            }
+        ],
+        "retention": {
+            "local_retention_days": 30,
+            "raw_export_retention": "NOT_APPLICABLE",
+            "path_retention": "NOT_RECORDED_IN_LEDGER",
+        },
+        "revocation": {
+            "state": "MANUAL_REVOCATION_REQUIRED_IF_ACTIVATED",
+            "operator_action": (
+                "Revoke provider access and remove local token material if activated."
+            ),
+        },
+        "audit": {
+            "receipt_required": True,
+            "path_retention": "NOT_RECORDED_IN_LEDGER",
+            "token_storage": "PROHIBITED",
+            "execution_log": "REQUIRED_BEFORE_COLLECTION",
+            "redaction_policy": "REQUIRED_BEFORE_COUNTERPARTY_DATA",
+        },
+    }
+
+
 def main() -> None:
     schema = load_event_schema()
     Draft202012Validator.check_schema(schema)
@@ -95,6 +205,8 @@ def main() -> None:
     Draft202012Validator.check_schema(policy_schema)
     asset_catalog_schema = load_asset_catalog_source_schema()
     Draft202012Validator.check_schema(asset_catalog_schema)
+    connector_grant_schema = load_connector_grant_source_schema()
+    Draft202012Validator.check_schema(connector_grant_schema)
     asset_catalog_source = _asset_catalog_source()
     validate_asset_catalog_source(asset_catalog_source)
     promoted_catalog = deepcopy(asset_catalog_source)
@@ -123,6 +235,44 @@ def main() -> None:
     asset_catalog_projection = ReadinProjection.replay(asset_catalog_events)
     if len(asset_catalog_projection.assets) != 1:
         raise AssertionError("asset catalog source did not replay into a tracked asset")
+    connector_grant_source = _connector_grant_source(asset_catalog_projection)
+    validate_connector_grant_source(connector_grant_source)
+    promoted_grant = deepcopy(connector_grant_source)
+    promoted_grant["grant"]["network_access"] = True  # type: ignore[index]
+    try:
+        validate_connector_grant_source(promoted_grant)
+    except ConnectorGrantContractError:
+        pass
+    else:
+        raise AssertionError("connector grant source network promotion was accepted")
+    active_grant = deepcopy(connector_grant_source)
+    active_grant["grant"]["grant_state"] = "ACTIVE"  # type: ignore[index]
+    try:
+        validate_connector_grant_source(active_grant)
+    except ConnectorGrantContractError:
+        pass
+    else:
+        raise AssertionError("connector grant source accepted an active grant")
+    asset_entity_id = connector_grant_source["asset"]["entity_id"]  # type: ignore[index]
+    asset_binding = asset_catalog_projection.entities[asset_entity_id]["attributes"][
+        "asset_catalog_binding"
+    ]
+    connector_grant_events = build_connector_grant_events(
+        connector_grant_source,
+        source_sha256="1" * 64,
+        source_size=1024,
+        asset_binding=asset_binding,
+    )
+    for event in connector_grant_events:
+        validate_event(event)
+    connector_grant_projection = ReadinProjection.replay(
+        [*asset_catalog_events, *connector_grant_events]
+    )
+    if not any(
+        observation["observation_type"] == CONNECTOR_GRANT_OBSERVATION_TYPE
+        for observation in connector_grant_projection.observations.values()
+    ):
+        raise AssertionError("connector grant did not replay into a grant observation")
     policy = build_github_public_repository_policy(
         "InvariantDynamics",
         "readin",
@@ -762,8 +912,9 @@ def main() -> None:
         raise AssertionError("workbench accepted a non-loopback host")
 
     print(
-        f"PASS schemas=3 positive_events={len(events)} "
+        f"PASS schemas=4 positive_events={len(events)} "
         f"asset_catalog_events={len(asset_catalog_events)} "
+        f"connector_grant_events={len(connector_grant_events)} "
         f"residual_fixture_events={len(residual_events)} "
         f"negative_contract_vectors=29 negative_semantic_vectors=28 "
         f"tracked_assets={len(projection.assets)} "
@@ -786,7 +937,8 @@ def main() -> None:
         f"forecast_fitter_specifications={len(projection.forecast_fitter_specifications)} "
         f"residual_readbacks={len(projection.residual_readbacks)} "
         "workbench_contracts=1 negative_workbench_vectors=2 "
-        "real_asset_policy_vectors=2 asset_catalog_policy_vectors=2"
+        "real_asset_policy_vectors=2 asset_catalog_policy_vectors=2 "
+        "connector_grant_policy_vectors=2"
     )
 
 

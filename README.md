@@ -343,6 +343,135 @@ explicitly grants and tests them.
 
 See [ADR 0018](docs/adr/0018-local-asset-catalog-onboarding.md) for the full onboarding boundary.
 
+### Record connector grant readiness
+
+After an asset is in the catalog, record a separate connector grant manifest before building any
+source-specific runner:
+
+```shell
+uv run readin record-connector-grant \
+  --ledger "$READIN_LEDGER" \
+  --manifest "$READIN_PRIVATE_DIR/linkedin-grant.json" \
+  --attest
+```
+
+The grant manifest references the `entity_id` and `asset_key` returned by
+`import-asset-catalog`. It records:
+
+- connector kind and version;
+- scope names, source surfaces, and minimization state;
+- allowed observation types that a later parser may emit;
+- retention, revocation, audit, and redaction requirements; and
+- hard gates for credentials, OAuth, network access, live collection, external action, and people
+  targeting.
+
+Example grant manifest for a future read-only profile connector:
+
+```json
+{
+  "schema_version": "readin.connector-grant-source.v0.1",
+  "grant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "declared_at": "2026-09-04T12:05:00Z",
+  "owner": {
+    "label": "Local operator",
+    "attestation": "USER_ATTESTED_NOT_VERIFIED",
+    "scope": "SELF_OR_CONTROLLED_ASSETS_ONLY"
+  },
+  "asset": {
+    "entity_id": "<asset-entity-id-from-import>",
+    "catalog_id": "<catalog-id-from-import>",
+    "asset_key": "<asset-key-from-import>",
+    "asset_class": "SOCIAL_ACCOUNT",
+    "platform": "LinkedIn",
+    "account_identifier": "operator"
+  },
+  "provider": {
+    "platform": "LinkedIn",
+    "connector_kind": "OAUTH_API",
+    "connector_name": "LinkedIn read-only profile setup",
+    "connector_version": "0.0.0-contract-only",
+    "terms_review_state": "REQUIRES_REVIEW",
+    "terms_reference_uri": "https://www.linkedin.com/legal/user-agreement"
+  },
+  "purpose": {
+    "kind": "CONNECTOR_READINESS_ASSESSMENT",
+    "statement": "Record a future read-only connector boundary for the operator account.",
+    "secondary_use": "PROHIBITED"
+  },
+  "grant": {
+    "grant_kind": "OAUTH_API_REQUIRES_SEPARATE_TOKEN_FLOW",
+    "grant_state": "RECORDED_NOT_ACTIVE",
+    "authorization_basis": "USER_OWNED_ACCOUNT_ATTESTED",
+    "access_mode": "API_CONNECTION_REQUIRES_SEPARATE_TOKEN_FLOW",
+    "collection_state": "NOT_STARTED",
+    "credential_material": "ABSENT",
+    "credential_storage": "PROHIBITED",
+    "oauth_state": "NOT_REQUESTED",
+    "live_collection_state": "DISABLED",
+    "network_access": false,
+    "external_action_state": "PROHIBITED",
+    "people_targeting": "PROHIBITED",
+    "activation_requirement": "SEPARATE_EXPLICIT_CONNECTOR_GRANT_REQUIRED"
+  },
+  "authority": {
+    "state": "NO_AUTHORITY",
+    "collection": "NOT_STARTED",
+    "external_actions": "PROHIBITED",
+    "credential_storage": "PROHIBITED",
+    "network_access": false,
+    "people_targeting": "PROHIBITED"
+  },
+  "source": {
+    "kind": "USER_DECLARED_LOCAL_GRANT_MANIFEST",
+    "network_access": false,
+    "credential_material": "ABSENT",
+    "path_retention": "NOT_RECORDED_IN_LEDGER"
+  },
+  "scopes": [
+    {
+      "scope_name": "profile_metadata",
+      "source_surface": "Self profile metadata",
+      "data_category": "ACCOUNT_PROFILE_METADATA",
+      "access_intent": "READ_ONLY_IF_SEPARATELY_ENABLED",
+      "minimization": "MINIMUM_NECESSARY",
+      "private_counterparty_data": "EXCLUDED",
+      "claim_extraction": "PROHIBITED"
+    }
+  ],
+  "allowed_observation_types": [
+    {
+      "observation_type": "social.profile_metadata",
+      "admission_state": "CONTRACTED_NOT_ENABLED",
+      "claim_extraction": "PROHIBITED",
+      "external_action_state": "PROHIBITED"
+    }
+  ],
+  "retention": {
+    "local_retention_days": 30,
+    "raw_export_retention": "NOT_APPLICABLE",
+    "path_retention": "NOT_RECORDED_IN_LEDGER"
+  },
+  "revocation": {
+    "state": "MANUAL_REVOCATION_REQUIRED_IF_ACTIVATED",
+    "operator_action": "If later activated, revoke access at the provider and remove local token material."
+  },
+  "audit": {
+    "receipt_required": true,
+    "path_retention": "NOT_RECORDED_IN_LEDGER",
+    "token_storage": "PROHIBITED",
+    "execution_log": "REQUIRED_BEFORE_COLLECTION",
+    "redaction_policy": "REQUIRED_BEFORE_COUNTERPARTY_DATA"
+  }
+}
+```
+
+`record-connector-grant` appends a local grant frame, evidence manifest, and immutable
+`asset_connector.grant_declared` observation. It does not request OAuth, store tokens, contact the
+provider, parse exports, or collect account data. It exists to make the next implementation step
+typed and reviewable before any sensor runner is written.
+
+See [ADR 0019](docs/adr/0019-connector-grant-readiness.md) for the connector-grant boundary.
+
 ## Quick start
 
 Install [uv](https://docs.astral.sh/uv/), then:

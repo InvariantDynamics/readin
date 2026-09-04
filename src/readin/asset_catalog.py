@@ -57,10 +57,19 @@ class AssetCatalogContractError(AssetCatalogError):
     """Raised when a manifest violates the closed asset-catalog source contract."""
 
 
-def _utc_timestamp(value: datetime | None = None) -> str:
-    selected = value or datetime.now(UTC)
+def _parse_timestamp(value: str | datetime) -> datetime:
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise AssetCatalogError(f"invalid timestamp: {value}") from error
+    return value
+
+
+def _utc_timestamp(value: str | datetime | None = None) -> str:
+    selected = _parse_timestamp(value) if value is not None else datetime.now(UTC)
     if selected.tzinfo is None or selected.utcoffset() is None:
-        raise ValueError("timestamps must include a UTC offset")
+        raise AssetCatalogError("timestamps must include a UTC offset")
     return selected.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 

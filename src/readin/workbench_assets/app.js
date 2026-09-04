@@ -387,6 +387,7 @@ function renderAudit() {
 function renderSetup(asset) {
   const setup = asset.governance.source_setup;
   const catalog = state.snapshot.asset_catalog;
+  const grant = asset.governance.connector_grant;
   if (!setup) {
     return `<div class="case-view">
       <section class="case-hero is-unbound">
@@ -404,7 +405,9 @@ function renderSetup(asset) {
     setup.collection_mode === "LOCAL_EXPORT_IMPORT_ONLY"
       ? "Next mechanism: add a source-specific local export parser and admit selected records as observations."
       : setup.collection_mode === "API_CONNECTION_REQUIRES_SEPARATE_GRANT"
-        ? "Next mechanism: create a separate connector grant contract before any OAuth or API read can occur."
+        ? grant
+          ? "Next mechanism: implement a source-specific connector runner behind this recorded grant; live collection is still disabled."
+          : "Next mechanism: create a separate connector grant contract before any OAuth or API read can occur."
         : "Next mechanism: enter or attach source observations manually through the local ledger.";
   const classes = catalog.asset_class_counts ?? {};
   const connections = catalog.connection_state_counts ?? {};
@@ -447,20 +450,83 @@ function renderSetup(asset) {
     ["Network access", String(setup.network_access)],
     ["External action", setup.external_action_state],
     ["People targeting", setup.people_targeting],
+    ["Connector grant", setup.connector_grant_state],
+    ["Grant access mode", setup.connector_grant_access_mode ?? "not recorded"],
     ["Source URI", setup.source_uri ?? "not declared"],
     ["Source digest", `sha256:${setup.source_digest_sha256}`],
   ])}`;
+
+  const scopeRows = grant
+    ? grant.scopes
+        .map(
+          (scope) => `<li class="record-row">
+            <div class="record-primary">${escapeHtml(scope.scope_name)}<small>${escapeHtml(scope.source_surface)}</small></div>
+            <div class="record-secondary">${escapeHtml(scope.data_category)}<small>${escapeHtml(scope.access_intent)}</small></div>
+            ${stateTag(scope.private_counterparty_data)}
+          </li>`,
+        )
+        .join("")
+    : "";
+  const outputRows = grant
+    ? grant.allowed_observation_types
+        .map(
+          (output) => `<li class="record-row">
+            <div class="record-primary">${escapeHtml(output.observation_type)}</div>
+            <div class="record-secondary">Claim extraction ${escapeHtml(output.claim_extraction)}</div>
+            ${stateTag(output.admission_state)}
+          </li>`,
+        )
+        .join("")
+    : "";
+  const grantBody = grant
+    ? `<div class="collection-boundary">
+        <div><span>${escapeHtml(grant.connector_name)}</span><strong>${escapeHtml(grant.grant_kind)}</strong></div>
+        <div class="collection-boundary-states">
+          ${stateTag(grant.grant_state)}
+          ${stateTag(grant.collection_state)}
+          ${stateTag(grant.live_collection_state)}
+        </div>
+        <p>Grant manifest recorded as evidence-backed observation ${escapeHtml(grant.observation_id)}. It stores no credentials and authorizes no runtime collection.</p>
+      </div>
+      ${factList([
+        ["Access mode", grant.access_mode],
+        ["OAuth", grant.oauth_state],
+        ["Credential material", grant.credential_material],
+        ["Credential storage", grant.credential_storage],
+        ["Terms review", grant.terms_review_state],
+        ["Network access", String(grant.network_access)],
+        ["External action", grant.external_action_state],
+        ["People targeting", grant.people_targeting],
+        ["Activation requirement", grant.activation_requirement],
+        ["Revocation", grant.revocation.state],
+        ["Grant digest", `sha256:${grant.source_digest_sha256}`],
+      ])}
+      <h3>Declared scopes</h3>
+      <ul class="record-list">${scopeRows}</ul>
+      <h3>Permitted observation outputs</h3>
+      <ul class="record-list">${outputRows}</ul>`
+    : `<div class="collection-boundary">
+        <div><span>No connector grant manifest recorded</span><strong>NOT_RECORDED</strong></div>
+        <div class="collection-boundary-states">
+          ${stateTag("NOT_RECORDED")}
+          ${stateTag("NOT_STARTED")}
+          ${stateTag("LIVE_COLLECTION_DISABLED")}
+        </div>
+        <p>The asset is tracked, but no source-specific scope, minimization, retention, revocation, or output contract has been admitted yet.</p>
+      </div>`;
 
   const pipeline = `<ol class="audit-sequence">
     <li><span class="audit-index">01</span><div><strong>Declare asset</strong><small>Private local manifest, owner-attested, schema validated</small></div>${stateTag("DONE")}</li>
     <li><span class="audit-index">02</span><div><strong>Manifest source</strong><small>SHA-256 evidence identity; source path not recorded in ledger</small></div>${stateTag("ADMITTED")}</li>
     <li><span class="audit-index">03</span><div><strong>Track asset</strong><small>Entity and tracking records replay into the catalog</small></div>${stateTag("TRACKED")}</li>
     <li><span class="audit-index">04</span><div><strong>Record connector intent</strong><small>Capabilities are represented as states, not credentials or sessions</small></div>${stateTag(setup.connection_state)}</li>
-    <li><span class="audit-index">05</span><div><strong>Gate live sensors</strong><small>OAuth, account APIs, monitoring, and external action remain unavailable until separately granted</small></div>${stateTag("LIVE_COLLECTION_DISABLED")}</li>
+    <li><span class="audit-index">05</span><div><strong>Record connector grant</strong><small>Scope, minimization, retention, revocation, and output observations are contracted separately</small></div>${stateTag(setup.connector_grant_state)}</li>
+    <li><span class="audit-index">06</span><div><strong>Gate live sensors</strong><small>OAuth, account APIs, monitoring, and external action remain unavailable until a later connector runner is explicitly enabled</small></div>${stateTag("LIVE_COLLECTION_DISABLED")}</li>
   </ol>`;
 
   return `<div class="overview-grid">
     ${sectionCard("Asset source setup", setup.connection_state, setupBody, true)}
+    ${sectionCard("Connector grant readiness", grant ? grant.grant_state : "NOT_RECORDED", grantBody, true)}
     ${sectionCard("Operational ingestion path", "manifest → catalog → observations", pipeline, true)}
     ${sectionCard("Catalog asset classes", `${catalog.asset_count} declared`, `<ul class="record-list">${classRows}</ul>`)}
     ${sectionCard("Connector states", catalog.live_collection_state, `<ul class="record-list">${connectionRows}</ul>`)}

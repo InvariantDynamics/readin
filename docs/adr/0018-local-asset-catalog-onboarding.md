@@ -85,6 +85,6 @@ connectors exist, while preserving the `NO_AUTHORITY` boundary and forcing futur
 connectors to arrive through separate, reviewed contracts.
 
 Future connector slices should consume this catalog state rather than inventing target scope at
-runtime. Each live connector still needs its own grant contract, minimization plan, retained-source
-policy, revocation/deletion handling, source-terms review, incidental-person controls, and negative
-tests.
+runtime. ADR 0019 adds the next connector-grant readiness contract. Each live connector still needs
+its own grant contract, minimization plan, retained-source policy, revocation/deletion handling,
+source-terms review, incidental-person controls, and negative tests.

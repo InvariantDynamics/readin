@@ -46,6 +46,12 @@ the manifest path, and admits asset declarations as user-declared observations w
 tokens, source-term approval, private-message access, follower/contact graph access, monitoring, or
 permission to investigate third parties.
 
+Connector grant manifests are also owner-only local files outside Git checkouts. A recorded grant is
+still `RECORDED_NOT_ACTIVE`: it stores no credential material, performs no OAuth flow, contacts no
+provider, parses no export, starts no monitor, and authorizes no people targeting or external
+action. It exists only to bind future source-runner implementation to explicit scopes,
+minimization, allowed observation outputs, retention, revocation, audit, and redaction controls.
+
 The loopback workbench has no authentication. It accepts only numeric `127.0.0.1` or `::1` listener
 bindings, verifies the bound socket is loopback, validates `Host` and `Origin`, and refuses mutation
 methods, but should still be treated as a same-user local presentation surface.

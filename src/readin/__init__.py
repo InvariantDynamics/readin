@@ -10,6 +10,15 @@ from readin.asset_catalog import (
     validate_asset_catalog_source,
 )
 from readin.belief import BeliefRuntimeError, execute_belief_revision
+from readin.connector_grants import (
+    ConnectorGrantContractError,
+    ConnectorGrantError,
+    build_connector_grant_events,
+    import_connector_grant_source,
+    load_connector_grant_source,
+    load_connector_grant_source_schema,
+    validate_connector_grant_source,
+)
 from readin.contracts import ContractViolation, validate_event
 from readin.discrimination import (
     DiscriminationRuntimeError,
@@ -88,6 +97,8 @@ __all__ = [
     "AssetCatalogContractError",
     "AssetCatalogError",
     "BeliefRuntimeError",
+    "ConnectorGrantContractError",
+    "ConnectorGrantError",
     "DiscriminationRuntimeError",
     "EventLedger",
     "FitterRuntimeError",
@@ -104,6 +115,7 @@ __all__ = [
     "ScenarioRuntimeError",
     "WorkbenchError",
     "build_asset_catalog_events",
+    "build_connector_grant_events",
     "build_workbench_snapshot",
     "create_belief_edge_created",
     "create_belief_revision_completed",
@@ -152,8 +164,12 @@ __all__ = [
     "execute_discrimination_plan",
     "execute_scenario",
     "import_asset_catalog_source",
+    "import_connector_grant_source",
     "load_asset_catalog_source",
     "load_asset_catalog_source_schema",
+    "load_connector_grant_source",
+    "load_connector_grant_source_schema",
+    "validate_connector_grant_source",
     "validate_asset_catalog_source",
     "validate_event",
 ]
