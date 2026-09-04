@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from readin.cli import main
+from readin.github_public import GitHubPublicError
 from readin.store import EventLedger
 from readin.synthetic import (
     phase1_events,
@@ -42,6 +46,255 @@ def test_cli_initializes_and_tracks_entity(tmp_path: Path, capsys: object) -> No
     assert output["entity_id"] == "55555555-5555-4555-8555-555555555555"
     assert len(output["events"]) == 2
     assert output["authority_state"] == "NO_AUTHORITY"
+
+
+def test_cli_initializes_policy_bound_public_repository_case(
+    tmp_path: Path, capsys: object
+) -> None:
+    case_dir = tmp_path / "public-repository-case"
+
+    result = main(
+        [
+            "init-github-public-repository-case",
+            "--case-dir",
+            str(case_dir),
+            "--owner",
+            "InvariantDynamics",
+            "--repository",
+            "readin",
+            "--purpose",
+            "Evaluate one bounded public repository acquisition through READIN.",
+            "--attest",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+
+    assert result == 0
+    assert output["case_dir"] == str(case_dir)
+    assert output["network_access"] == "NOT_ATTEMPTED"
+    assert output["authority_state"] == "NO_AUTHORITY"
+    assert (case_dir / "policy.json").is_file()
+    assert (case_dir / "events.jsonl").is_file()
+
+
+def test_cli_case_initialization_fails_without_attestation(tmp_path: Path, capsys: object) -> None:
+    case_dir = tmp_path / "unattested-case"
+
+    result = main(
+        [
+            "init-github-public-repository-case",
+            "--case-dir",
+            str(case_dir),
+            "--owner",
+            "InvariantDynamics",
+            "--repository",
+            "readin",
+            "--purpose",
+            "Evaluate one bounded public repository acquisition through READIN.",
+        ]
+    )
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+
+    assert result == 2
+    assert "explicit attestation is required" in captured.err
+    assert not case_dir.exists()
+
+
+def test_cli_refuses_generic_writes_to_policy_bound_case(tmp_path: Path, capsys: object) -> None:
+    case_dir = tmp_path / "protected-case"
+    assert (
+        main(
+            [
+                "init-github-public-repository-case",
+                "--case-dir",
+                str(case_dir),
+                "--owner",
+                "InvariantDynamics",
+                "--repository",
+                "readin",
+                "--purpose",
+                "Verify that generic CLI writes cannot bypass the case connector.",
+                "--attest",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()  # type: ignore[attr-defined]
+
+    result = main(
+        [
+            "create-entity",
+            "--ledger",
+            str(case_dir / "events.jsonl"),
+            "--name",
+            "Bypass attempt",
+            "--type",
+            "Person",
+        ]
+    )
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+
+    assert result == 2
+    assert "accept writes only through their declared case connector" in captured.err
+    assert len(EventLedger(case_dir / "events.jsonl").read_events()) == 3
+
+
+def test_cli_refuses_policy_bound_ledger_when_policy_is_missing(
+    tmp_path: Path, capsys: object
+) -> None:
+    case_dir = tmp_path / "missing-policy-case"
+    assert (
+        main(
+            [
+                "init-github-public-repository-case",
+                "--case-dir",
+                str(case_dir),
+                "--owner",
+                "InvariantDynamics",
+                "--repository",
+                "readin",
+                "--purpose",
+                "Verify that removing the policy does not open the case ledger.",
+                "--attest",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()  # type: ignore[attr-defined]
+    (case_dir / "policy.json").unlink()
+
+    result = main(["list-assets", "--ledger", str(case_dir / "events.jsonl")])
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+
+    assert result == 2
+    assert "missing its required policy.json" in captured.err
+
+
+def test_cli_refuses_adjacent_noncanonical_case_ledger(tmp_path: Path, capsys: object) -> None:
+    case_dir = tmp_path / "alternate-ledger-case"
+    assert (
+        main(
+            [
+                "init-github-public-repository-case",
+                "--case-dir",
+                str(case_dir),
+                "--owner",
+                "InvariantDynamics",
+                "--repository",
+                "readin",
+                "--purpose",
+                "Verify CLI reads cannot substitute an adjacent unvalidated ledger.",
+                "--attest",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()  # type: ignore[attr-defined]
+    events = EventLedger(case_dir / "events.jsonl").read_events()
+    events[0]["payload"]["entity"]["canonical_name"] = "Unvalidated/alternate"
+    alternate_path = case_dir / "alternate.jsonl"
+    alternate_path.write_text(
+        "".join(json.dumps(event, separators=(",", ":")) + "\n" for event in events),
+        encoding="utf-8",
+    )
+    alternate_path.chmod(0o600)
+
+    result = main(["list-assets", "--ledger", str(alternate_path)])
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+
+    assert result == 2
+    assert "canonical events.jsonl" in captured.err
+
+
+def test_cli_workbench_reports_reserved_attempt_without_admitted_artifact(
+    tmp_path: Path, capsys: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case_dir = tmp_path / "failed-collection-case"
+    assert (
+        main(
+            [
+                "init-github-public-repository-case",
+                "--case-dir",
+                str(case_dir),
+                "--owner",
+                "InvariantDynamics",
+                "--repository",
+                "readin",
+                "--purpose",
+                "Verify CLI workbench attempt-state accounting.",
+                "--attest",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()  # type: ignore[attr-defined]
+
+    def failed_fetch(
+        owner: str,
+        repository: str,
+        *,
+        max_bytes: int,
+        wall_clock_deadline: datetime,
+    ) -> None:
+        raise GitHubPublicError("bounded transport failure")
+
+    monkeypatch.setattr("readin.real_asset_cases.fetch_public_repository", failed_fetch)
+    assert main(["collect-github-public-repository-case", "--case-dir", str(case_dir)]) == 2
+    capsys.readouterr()  # type: ignore[attr-defined]
+
+    assert main(["show-workbench", "--ledger", str(case_dir / "events.jsonl")]) == 0
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+
+    assert output["epistemic_limits"]["collection_state"] == (
+        "NETWORK_ATTEMPT_RESERVED_NO_ADMISSION"
+    )
+    assert output["epistemic_limits"]["acquisition_state"] == "NO_ARTIFACT_ADMITTED"
+
+
+def test_cli_launches_workbench_from_a_case_directory_and_requests_browser_open(
+    tmp_path: Path,
+    capsys: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case_dir = tmp_path / "case"
+    calls: dict[str, object] = {}
+
+    def serve(
+        ledger_path: Path,
+        *,
+        host: str,
+        port: int,
+        open_browser: bool,
+    ) -> None:
+        calls.update(
+            ledger_path=ledger_path,
+            host=host,
+            port=port,
+            open_browser=open_browser,
+        )
+
+    monkeypatch.setattr("readin.cli.serve_workbench", serve)
+
+    result = main(
+        [
+            "workbench",
+            "--case-dir",
+            str(case_dir),
+            "--port",
+            "4317",
+            "--open-browser",
+        ]
+    )
+    output = json.loads(capsys.readouterr().out)  # type: ignore[attr-defined]
+
+    assert result == 0
+    assert calls == {
+        "ledger_path": case_dir / "events.jsonl",
+        "host": "127.0.0.1",
+        "port": 4317,
+        "open_browser": True,
+    }
+    assert output == {"authority_state": "NO_AUTHORITY", "status": "stopped"}
 
 
 def test_cli_exposes_hindsight_labeled_timeline(tmp_path: Path, capsys: object) -> None:

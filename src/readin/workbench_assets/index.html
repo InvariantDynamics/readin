@@ -1,13 +1,53 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-launch-mode="pending">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <title>READIN Asset Workbench</title>
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <script src="./launch-guard.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <main class="launch-diagnostic" aria-labelledby="launch-title">
+      <section class="launch-card">
+        <div class="launch-brand" aria-label="READIN">
+          <span class="brand-mark" aria-hidden="true">R</span>
+          <span class="brand-word">READIN</span>
+          <span class="launch-badge">LOCAL WORKBENCH</span>
+        </div>
+        <p class="launch-eyebrow">Launch required</p>
+        <h1 id="launch-title">This source file is not the application.</h1>
+        <p class="launch-summary">
+          The workbench needs READIN's loopback service to load its stylesheet, replay a case
+          ledger, and enforce the read-only boundary. Opening <code>index.html</code> directly
+          cannot do that.
+        </p>
+        <div class="launch-command" aria-label="Launch command">
+          <span>Run from the READIN repository</span>
+          <code>uv run readin workbench --case-dir "/absolute/path/to/case" --open-browser</code>
+        </div>
+        <div class="launch-next">
+          <div>
+            <span class="launch-step">01</span>
+            <p>Replace the example path with the case directory that contains <code>events.jsonl</code>.</p>
+          </div>
+          <div>
+            <span class="launch-step">02</span>
+            <p>Keep the Terminal window open while you use the workbench.</p>
+          </div>
+          <div>
+            <span class="launch-step">03</span>
+            <p>Stop the local service with <kbd>Control</kbd> + <kbd>C</kbd>.</p>
+          </div>
+        </div>
+        <footer class="launch-boundary">
+          <strong>NO_AUTHORITY</strong>
+          <span>No case data was loaded, changed, collected, or transmitted from this file.</span>
+        </footer>
+      </section>
+    </main>
+
     <div class="app-shell">
       <header class="topbar">
         <div class="brand" aria-label="READIN">
@@ -29,7 +69,7 @@
       <div class="authority-strip" role="status">
         <strong>NO_AUTHORITY</strong>
         <span>Read-only local inspection</span>
-        <span>No collection</span>
+        <span>No autonomous collection</span>
         <span>No calibrated prediction</span>
         <span>No external action</span>
       </div>
@@ -79,15 +119,17 @@
         <section class="metric-strip" id="metric-strip" aria-label="Asset counts"></section>
 
         <nav class="view-tabs" aria-label="Workbench views">
-          <button class="tab-button is-active" type="button" data-tab="overview">Overview</button>
-          <button class="tab-button" type="button" data-tab="claims">Claims</button>
+          <button class="tab-button is-active" type="button" data-tab="case">Case</button>
+          <button class="tab-button" type="button" data-tab="audit">Audit</button>
           <button class="tab-button" type="button" data-tab="evidence">Evidence</button>
+          <button class="tab-button" type="button" data-tab="timeline">Timeline</button>
+          <button class="tab-button" type="button" data-tab="overview">Analysis</button>
+          <button class="tab-button" type="button" data-tab="claims">Claims</button>
           <button class="tab-button" type="button" data-tab="relations">Relations</button>
           <button class="tab-button" type="button" data-tab="belief">Belief</button>
           <button class="tab-button" type="button" data-tab="scenarios">Scenarios</button>
           <button class="tab-button" type="button" data-tab="collection">Next observation</button>
           <button class="tab-button" type="button" data-tab="readback">Readback</button>
-          <button class="tab-button" type="button" data-tab="timeline">Timeline</button>
         </nav>
 
         <section class="view-panel" id="view-panel"></section>
@@ -122,6 +164,6 @@
         <p>The local ledger contains no corresponding records for this tracked asset.</p>
       </div>
     </template>
-    <script src="/assets/app.js" defer></script>
+    <script src="./app.js" defer></script>
   </body>
 </html>

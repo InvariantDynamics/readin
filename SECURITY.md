@@ -12,6 +12,33 @@ in a public issue.
 
 ## Current security boundary
 
-The current release is a local reference implementation with manual synthetic input. It has no live
-connectors, credential store, network service, browser automation, model runtime, or external action
-path. Schema validation and file locking are integrity controls, not a security sandbox.
+The Phase 0 through Phase 8G runtime remains a local reference implementation centered on manual and
+synthetic input. The experimental real-asset H0 slice adds exactly one live path: a user-invoked,
+credential-free request for one policy-declared public GitHub repository metadata record. It is not
+a general URL client, crawler, authenticated account connector, person-search system, or monitor.
+
+H0 sends no credential or cookie, disables proxies and redirects, makes one bounded request, stores
+exact response bytes in an owner-only case vault, and admits only an allowlisted repository-level
+observation with `NO_AUTHORITY`. It does not retrieve contributors, commits, members, issues, pull
+requests, repository contents, or private resources, and it does not create person targets or
+profiles. The raw GitHub response contains public owner-account fields; the ledger keeps only the
+owner login, numeric account ID, and account type needed for target binding and classification. See
+`docs/adr/0017-bounded-public-repository-acquisition.md` for the complete boundary and limitations.
+
+The request has one shrinking 15-second admission budget from before DNS through body completion,
+plus the case policy's exclusive wall-clock cutoff. Synchronous DNS, connection, and HTTP-header work
+inside the Python standard library cannot be preempted in-process; a late return is closed and rejected
+without artifact admission, but elapsed process runtime can exceed that budget. Strict runtime
+preemption would require a supervised child process or a different nonblocking transport.
+
+Completed-case reads fail closed unless the policy, genesis binding, request marker, receipt digest,
+raw artifact hash and size, evidence manifest, and admitted observation remain mutually consistent.
+This is application-level tamper detection, not WORM storage or protection from a process already
+running as the same macOS user.
+
+The loopback workbench has no authentication. It accepts only numeric `127.0.0.1` or `::1` listener
+bindings, verifies the bound socket is loopback, validates `Host` and `Origin`, and refuses mutation
+methods, but should still be treated as a same-user local presentation surface.
+Schema validation, path checks, file permissions, and locking are integrity controls, not a security
+sandbox. READIN does not provide disk encryption, secure erasure, malware isolation, or protection
+from another process already running as the same macOS user.

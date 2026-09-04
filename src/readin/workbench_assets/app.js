@@ -1,7 +1,7 @@
 const state = {
   snapshot: null,
   selectedAssetId: null,
-  activeTab: "overview",
+  activeTab: "case",
   search: "",
 };
 
@@ -18,6 +18,18 @@ const escapeHtml = (value) =>
 const shortId = (value) => (value ? value.slice(0, 8) : "—");
 const titleCase = (value) =>
   String(value ?? "").toLowerCase().replaceAll("_", " ").replaceAll(".", " ");
+const formatBytes = (value) => {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes)) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+};
+const formatDate = (value) => {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return String(value);
+  return parsed.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+};
 
 function stateClass(value) {
   const text = String(value ?? "");
@@ -30,7 +42,15 @@ function stateClass(value) {
   ) {
     return "is-warning";
   }
-  if (text.includes("SUPPORT") || text.includes("MATCHED") || text === "FIT") return "is-good";
+  if (
+    text.includes("SUPPORT") ||
+    text.includes("MATCHED") ||
+    text.includes("VERIFIED") ||
+    text.includes("ADMITTED") ||
+    text === "FIT"
+  ) {
+    return "is-good";
+  }
   return "is-info";
 }
 
@@ -43,6 +63,17 @@ function sectionCard(title, meta, body, wide = false) {
     <div class="section-title"><h3>${escapeHtml(title)}</h3><span>${escapeHtml(meta)}</span></div>
     ${body}
   </section>`;
+}
+
+function factList(items) {
+  return `<dl class="fact-list">${items
+    .map(
+      ([label, value]) => `<div class="fact-row">
+        <dt>${escapeHtml(label)}</dt>
+        <dd>${escapeHtml(value)}</dd>
+      </div>`,
+    )
+    .join("")}</dl>`;
 }
 
 function emptyState() {
@@ -85,14 +116,24 @@ function renderHeader(asset) {
     : "No aliases recorded";
   byId("state-version").textContent = asset.tracking.state_version;
 
-  const metrics = [
-    [asset.counts.observations, "Observations"],
-    [asset.counts.claims, "Claims"],
-    [asset.counts.observer_frames, "Frames"],
-    [asset.counts.dependency_edges, "Dependencies"],
-    [asset.counts.hypotheses, "Hypotheses"],
-    [asset.counts.scenarios, "Scenarios"],
-  ];
+  const caseFile = state.snapshot.case;
+  const metrics = caseFile
+    ? [
+        [asset.counts.observations, "Observations"],
+        [asset.counts.claims, "Claims"],
+        [asset.counts.evidence_manifests, "Artifacts"],
+        [caseFile.budgets.network_requests_used, "Requests used"],
+        [state.snapshot.generated_from.event_count, "Ledger events"],
+        [asset.counts.relations, "Relations"],
+      ]
+    : [
+        [asset.counts.observations, "Observations"],
+        [asset.counts.claims, "Claims"],
+        [asset.counts.observer_frames, "Frames"],
+        [asset.counts.dependency_edges, "Dependencies"],
+        [asset.counts.hypotheses, "Hypotheses"],
+        [asset.counts.scenarios, "Scenarios"],
+      ];
   byId("metric-strip").innerHTML = metrics
     .map(
       ([value, label]) => `<div class="metric">
@@ -127,6 +168,216 @@ function renderLimits() {
       </div>`,
     )
     .join("");
+}
+
+function renderCase(asset) {
+  const caseFile = state.snapshot.case;
+  if (!caseFile) {
+    return `<div class="case-view">
+      <section class="case-hero is-unbound">
+        <div>
+          <span class="eyebrow">Local ledger</span>
+          <h2>No policy-bound real-asset case</h2>
+          <p>This ledger can be inspected locally, but it has no H0 case policy or acquisition-custody chain.</p>
+        </div>
+        ${stateTag("NO_AUTHORITY")}
+      </section>
+    </div>`;
+  }
+
+  const observation = asset.evidence.observations.find(
+    (item) => item.provenance.adapter === "github-public-rest",
+  );
+  const repositoryEnvelope = observation?.content?.structured_payload?.repository;
+  const repository = repositoryEnvelope?.repository;
+  const owner = repositoryEnvelope?.owner;
+  const custody = `<ol class="custody-chain">${caseFile.custody.checks
+    .map(
+      (item, index) => `<li>
+        <span class="custody-index">${String(index + 1).padStart(2, "0")}</span>
+        <div><strong>${escapeHtml(item.component)}</strong><small>${escapeHtml(item.detail)}</small></div>
+        ${stateTag(item.state)}
+      </li>`,
+    )
+    .join("")}</ol>`;
+  const exclusions = [
+    ["Contributors", caseFile.minimization.contributors],
+    ["Commit authors", caseFile.minimization.commit_authors],
+    ["Organization members", caseFile.minimization.organization_members],
+    ["Issues and pull requests", caseFile.minimization.issues_and_pull_requests],
+    ["External URL following", caseFile.minimization.automatic_external_url_following],
+  ];
+  const exclusionRows = `<ul class="exclusion-list">${exclusions
+    .map(
+      ([label, value]) => `<li><span>${escapeHtml(label)}</span>${stateTag(value)}</li>`,
+    )
+    .join("")}</ul>`;
+  const repositoryBody = repository
+    ? `<div class="repository-summary">
+        <p>${escapeHtml(repository.description || "No source description returned.")}</p>
+        <div class="repository-stat-grid">
+          <div><strong>${escapeHtml(repository.language || "—")}</strong><span>Language</span></div>
+          <div><strong>${escapeHtml(repository.license_spdx_id || "—")}</strong><span>License</span></div>
+          <div><strong>${escapeHtml(repository.default_branch)}</strong><span>Default branch</span></div>
+          <div><strong>${escapeHtml(repository.open_issues_count)}</strong><span>Open issues</span></div>
+          <div><strong>${escapeHtml(repository.stargazers_count)}</strong><span>Stars</span></div>
+          <div><strong>${escapeHtml(repository.forks_count)}</strong><span>Forks</span></div>
+        </div>
+        ${factList([
+          ["Owner", `${owner?.login ?? "—"} · ${owner?.type ?? "—"}`],
+          ["Visibility", repository.visibility],
+          ["Created", formatDate(repository.created_at)],
+          ["Last source update", formatDate(repository.updated_at)],
+          ["Last push", formatDate(repository.pushed_at)],
+          ["Verification", repositoryEnvelope.verification_state],
+        ])}
+      </div>`
+    : emptyState();
+
+  return `<div class="case-view">
+    <section class="case-hero">
+      <div>
+        <span class="eyebrow">Validated local case · ${escapeHtml(shortId(caseFile.case_id))}</span>
+        <h2>${escapeHtml(caseFile.purpose.statement)}</h2>
+        <p>${escapeHtml(caseFile.target.github.request_url)}</p>
+      </div>
+      <div class="case-status">
+        <span>Collection result</span>
+        ${stateTag(caseFile.collection.result)}
+      </div>
+    </section>
+
+    <section class="case-summary-strip" aria-label="Case boundaries">
+      <div><strong>${caseFile.budgets.network_requests_used}/${caseFile.budgets.max_network_requests}</strong><span>Network requests</span></div>
+      <div><strong>${caseFile.budgets.artifacts_admitted}/${caseFile.budgets.max_artifacts}</strong><span>Artifacts admitted</span></div>
+      <div><strong>${caseFile.budgets.max_relation_hops}</strong><span>Relation hops</span></div>
+      <div><strong>${escapeHtml(caseFile.source.authentication_mode)}</strong><span>Authentication</span></div>
+      <div><strong>${formatBytes(caseFile.evidence?.size)}</strong><span>Retained bytes</span></div>
+    </section>
+
+    <div class="overview-grid case-grid">
+      ${sectionCard(
+        "Case contract",
+        caseFile.state,
+        factList([
+          ["Purpose class", caseFile.purpose.kind],
+          ["Subject class", caseFile.target.subject_class],
+          ["Authorization basis", caseFile.target.authorization_basis],
+          ["Declared", formatDate(caseFile.declared_at)],
+          ["Retention review", formatDate(caseFile.retention.delete_at)],
+          ["Secondary use", caseFile.purpose.secondary_use],
+        ]),
+      )}
+      ${sectionCard(
+        "Source scope",
+        "EXACT TARGET ONLY",
+        factList([
+          ["Connector", caseFile.source.connector],
+          ["Allowed host", caseFile.source.allowed_host],
+          ["Access policy", caseFile.source.access_policy],
+          ["Authentication", caseFile.source.authentication_mode],
+          ["Redirects", caseFile.source.redirect_policy],
+          ["Proxy", caseFile.source.proxy_policy],
+        ]),
+      )}
+      ${sectionCard("Evidence custody", caseFile.custody.state, custody, true)}
+      ${sectionCard("Observed repository record", observation ? formatDate(observation.observed_at) : "none", repositoryBody, true)}
+      ${sectionCard("Excluded by policy", "MINIMIZATION", exclusionRows)}
+      ${sectionCard(
+        "Interpretation boundary",
+        "NO_AUTHORITY",
+        `<div class="boundary-copy">
+          <p>This is one source-reported repository response from one public endpoint.</p>
+          <p>It is an immutable observation, not a verified fact, independent source, resolved identity, claim, belief, prediction, or permission to act.</p>
+        </div>`,
+      )}
+    </div>
+  </div>`;
+}
+
+function renderAudit() {
+  const caseFile = state.snapshot.case;
+  const audit = caseFile?.audit;
+  if (!audit) {
+    return `<div class="case-view">
+      <section class="case-hero is-unbound">
+        <div>
+          <span class="eyebrow">Audit</span>
+          <h2>No H0 audit chain is available</h2>
+          <p>This ledger was not opened through a policy-bound real-asset case read gate.</p>
+        </div>
+        ${stateTag("NO_AUTHORITY")}
+      </section>
+    </div>`;
+  }
+
+  const files = `<ul class="record-list">${audit.files
+    .map(
+      (item) => `<li class="record-row audit-file-row">
+        <div class="record-primary">${escapeHtml(item.label)}<small>${formatBytes(item.size)}</small></div>
+        <div class="record-secondary">${escapeHtml(item.path)}
+          <small>${item.sha256 ? `sha256:${escapeHtml(item.sha256)}` : "no digest recorded"}</small>
+        </div>
+        ${stateTag(item.state)}
+      </li>`,
+    )
+    .join("")}</ul>`;
+  const events = `<ol class="audit-sequence">${audit.ledger_events
+    .map(
+      (item) => `<li>
+        <span class="audit-index">${String(item.index).padStart(2, "0")}</span>
+        <div>
+          <strong>${escapeHtml(item.event_type)}</strong>
+          <small>${escapeHtml(item.payload_label)}</small>
+          <small>${escapeHtml(item.occurred_at)}</small>
+        </div>
+        <div class="audit-event-state">
+          <small>${escapeHtml(shortId(item.event_id))}</small>
+          ${stateTag(item.authority_state)}
+        </div>
+      </li>`,
+    )
+    .join("")}</ol>`;
+  const response = caseFile.evidence
+    ? `<div class="aperture-grid">
+        <div class="aperture-cell"><strong>${escapeHtml(caseFile.evidence.http_status)}</strong><span>HTTP status</span></div>
+        <div class="aperture-cell"><strong>${escapeHtml(caseFile.evidence.media_type)}</strong><span>Media type</span></div>
+        <div class="aperture-cell"><strong>${formatBytes(caseFile.evidence.size)}</strong><span>Artifact size</span></div>
+        <div class="aperture-cell"><strong>${escapeHtml(caseFile.source.authentication_mode)}</strong><span>Credential state</span></div>
+      </div>
+      ${factList([
+        ["Receipt", caseFile.evidence.receipt_id],
+        ["Receipt digest", `sha256:${caseFile.evidence.receipt_sha256}`],
+        ["Artifact digest", `sha256:${caseFile.evidence.artifact_sha256}`],
+        ["Acquired", formatDate(caseFile.evidence.acquired_at)],
+      ])}`
+    : `<div class="collection-boundary">
+        <div><span>Receipt</span><strong>No source artifact admitted</strong></div>
+        <div class="collection-boundary-states">
+          ${stateTag(caseFile.collection.result)}
+          ${stateTag(caseFile.collection.attempt_state)}
+        </div>
+        <p>The one-request marker exists, but no artifact is available to inspect in this case.</p>
+      </div>`;
+
+  return `<div class="case-view audit-view">
+    <section class="case-summary-strip audit-summary" aria-label="Audit summary">
+      <div><strong>${escapeHtml(audit.read_gate)}</strong><span>Read gate</span></div>
+      <div><strong>${escapeHtml(audit.sequence_state)}</strong><span>Ledger sequence</span></div>
+      <div><strong>${escapeHtml(audit.event_count)}</strong><span>Ledger events</span></div>
+      <div><strong>${escapeHtml(audit.raw_artifact_preview)}</strong><span>Raw artifact preview</span></div>
+      <div><strong>${escapeHtml(audit.authority_state)}</strong><span>Authority</span></div>
+    </section>
+    <div class="overview-grid">
+      ${sectionCard("Local case paths", "owner-local files", factList([
+        ["Case directory", audit.case_dir],
+        ["Ledger", audit.ledger_path],
+      ]), true)}
+      ${sectionCard("Case files", "validated after read gate", files, true)}
+      ${sectionCard("Receipt and response", caseFile.collection.result, response, true)}
+      ${sectionCard("Ledger event sequence", audit.sequence_state, events, true)}
+    </div>
+  </div>`;
 }
 
 function renderOverview(asset) {
@@ -214,12 +465,23 @@ function renderClaims(asset) {
 }
 
 function renderEvidence(asset) {
+  const observations = asset.evidence.observations.length
+    ? `<ul class="record-list">${asset.evidence.observations
+        .map(
+          (item) => `<li class="record-row">
+            <div class="record-primary">${escapeHtml(titleCase(item.observation_type))}<small>${shortId(item.id)} · immutable ${escapeHtml(item.immutable)}</small></div>
+            <div class="record-secondary">${escapeHtml(item.provenance.source_uri)}<small>${formatDate(item.observed_at)} · ${escapeHtml(item.provenance.adapter)} ${escapeHtml(item.provenance.adapter_version)}</small></div>
+            ${stateTag(item.epistemic.missingness_state)}
+          </li>`,
+        )
+        .join("")}</ul>`
+    : emptyState();
   const manifests = asset.evidence.manifests.length
     ? `<ul class="record-list">${asset.evidence.manifests
         .map(
           (item) => `<li class="record-row">
             <div class="record-primary">${escapeHtml(item.source_label)}<small>${shortId(item.id)}</small></div>
-            <div class="record-secondary">${escapeHtml(item.source_uri)}<small>sha256:${escapeHtml(item.sha256.slice(0, 16))}… · ${item.transformation_count} transform(s)</small></div>
+            <div class="record-secondary">${escapeHtml(item.source_uri)}<small>${formatBytes(item.size)} · ${escapeHtml(item.media_type)} · ${formatDate(item.acquired_at)}</small><small>sha256:${escapeHtml(item.sha256)} · ${item.transformation_count} transform(s)</small></div>
             ${stateTag(item.access_policy)}
           </li>`,
         )
@@ -237,6 +499,7 @@ function renderEvidence(asset) {
         .join("")}</ul>`
     : emptyState();
   return `<div class="overview-grid">
+    ${sectionCard("Admitted observations", `${asset.evidence.observations.length} immutable`, observations, true)}
     ${sectionCard("Evidence manifests", `${asset.evidence.manifests.length} immutable`, manifests, true)}
     ${sectionCard("Dependency ancestry", `${asset.evidence.dependencies.length} edges`, dependencies, true)}
   </div>`;
@@ -552,6 +815,8 @@ function renderTimeline(asset) {
 
 function renderActiveView(asset) {
   const renderers = {
+    case: renderCase,
+    audit: renderAudit,
     overview: renderOverview,
     claims: renderClaims,
     evidence: renderEvidence,
@@ -603,20 +868,22 @@ async function loadSnapshot(assetId = null) {
   }
 }
 
-document.querySelectorAll("[data-tab]").forEach((button) => {
-  button.addEventListener("click", () => {
-    state.activeTab = button.dataset.tab;
-    document.querySelectorAll("[data-tab]").forEach((item) => {
-      item.classList.toggle("is-active", item === button);
+if (document.documentElement.dataset.launchMode === "served") {
+  document.querySelectorAll("[data-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeTab = button.dataset.tab;
+      document.querySelectorAll("[data-tab]").forEach((item) => {
+        item.classList.toggle("is-active", item === button);
+      });
+      if (state.snapshot?.selected_asset) renderActiveView(state.snapshot.selected_asset);
     });
-    if (state.snapshot?.selected_asset) renderActiveView(state.snapshot.selected_asset);
   });
-});
 
-byId("asset-search").addEventListener("input", (event) => {
-  state.search = event.target.value;
-  renderCatalog();
-});
-byId("refresh-button").addEventListener("click", () => loadSnapshot(state.selectedAssetId));
+  byId("asset-search").addEventListener("input", (event) => {
+    state.search = event.target.value;
+    renderCatalog();
+  });
+  byId("refresh-button").addEventListener("click", () => loadSnapshot(state.selectedAssetId));
 
-loadSnapshot();
+  loadSnapshot();
+}

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import socket
+import webbrowser
 from copy import deepcopy
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,11 +18,87 @@ from readin.projection import ProjectionError, ReadinProjection
 from readin.store import EventLedger, LedgerError
 
 WORKBENCH_SCHEMA_VERSION = "readin.workbench.v0.1"
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+LOOPBACK_BIND_HOSTS = frozenset({"127.0.0.1", "::1"})
+LOOPBACK_REQUEST_HOSTS = LOOPBACK_BIND_HOSTS | {"localhost"}
 
 
 class WorkbenchError(ValueError):
     """Raised when the bounded workbench contract cannot be produced or served."""
+
+
+class _RequestAuthorityError(ValueError):
+    """Internal fail-closed classification for an untrusted HTTP authority."""
+
+    def __init__(self, message: str, status: HTTPStatus) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def _parse_loopback_authority(
+    value: str,
+    *,
+    server_port: int,
+    default_port: int,
+    field_name: str,
+) -> None:
+    """Require one syntactically complete loopback authority for this listener."""
+
+    if not value or value != value.strip():
+        raise _RequestAuthorityError(f"malformed {field_name}", HTTPStatus.BAD_REQUEST)
+
+    try:
+        parsed = urlsplit(f"//{value}")
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as error:
+        raise _RequestAuthorityError(f"malformed {field_name}", HTTPStatus.BAD_REQUEST) from error
+
+    if (
+        not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or value.endswith(":")
+    ):
+        raise _RequestAuthorityError(f"malformed {field_name}", HTTPStatus.BAD_REQUEST)
+    if hostname.lower() not in LOOPBACK_REQUEST_HOSTS:
+        raise _RequestAuthorityError(f"untrusted {field_name}", HTTPStatus.MISDIRECTED_REQUEST)
+    if (port if port is not None else default_port) != server_port:
+        raise _RequestAuthorityError(
+            f"{field_name} port does not match listener",
+            HTTPStatus.MISDIRECTED_REQUEST,
+        )
+
+
+def _validate_origin(value: str, *, server_port: int) -> None:
+    """Require a present Origin to identify this loopback HTTP listener."""
+
+    if not value or value != value.strip():
+        raise _RequestAuthorityError("malformed Origin", HTTPStatus.FORBIDDEN)
+
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as error:
+        raise _RequestAuthorityError("malformed Origin", HTTPStatus.FORBIDDEN) from error
+
+    if (
+        parsed.scheme.lower() != "http"
+        or not parsed.netloc
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.netloc.endswith(":")
+        or hostname.lower() not in LOOPBACK_REQUEST_HOSTS
+        or (port if port is not None else 80) != server_port
+    ):
+        raise _RequestAuthorityError("untrusted Origin", HTTPStatus.FORBIDDEN)
 
 
 def _entity_label(projection: ReadinProjection, entity_id: str) -> str:
@@ -54,9 +132,305 @@ def _catalog_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _observation_workbench(observation: dict[str, Any]) -> dict[str, Any]:
+    """Project one immutable observation without promoting it to a claim."""
+
+    return {
+        "id": observation["id"],
+        "observation_type": observation["observation_type"],
+        "observed_at": observation["observed_at"],
+        "observer_frame_id": observation["observer_frame_id"],
+        "source_artifact_id": observation["source_artifact_id"],
+        "immutable": observation["immutable"],
+        "content": deepcopy(observation["content"]),
+        "provenance": deepcopy(observation["provenance"]),
+        "epistemic": deepcopy(observation["epistemic"]),
+    }
+
+
+def _event_payload_label(event: dict[str, Any]) -> str:
+    payload = event["payload"]
+    event_type = event["event_type"]
+    if event_type == "entity.created":
+        return payload["entity"]["canonical_name"]
+    if event_type == "asset.tracking_started":
+        return payload["tracked_asset"]["entity_id"]
+    if event_type == "observer_frame.registered":
+        return payload["observer_frame"]["name"]
+    if event_type == "evidence.manifested":
+        return payload["evidence_manifest"]["source"]["label"]
+    if event_type == "observation.admitted":
+        return payload["observation"]["observation_type"]
+    return event_type
+
+
+def _ledger_event_audit(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "index": index,
+            "event_id": event["event_id"],
+            "event_type": event["event_type"],
+            "occurred_at": event["occurred_at"],
+            "authority_state": event["authority_state"],
+            "payload_label": _event_payload_label(event),
+        }
+        for index, event in enumerate(events, start=1)
+    ]
+
+
+def _path_audit_item(
+    label: str,
+    path: Path,
+    *,
+    state: str,
+    sha256: str | None = None,
+    missing_state: str = "NOT_PRESENT",
+) -> dict[str, Any]:
+    try:
+        target_stat = path.lstat()
+    except FileNotFoundError:
+        target_stat = None
+    return {
+        "label": label,
+        "path": str(path),
+        "state": state if target_stat is not None else missing_state,
+        "sha256": sha256,
+        "size": target_stat.st_size if target_stat is not None else None,
+    }
+
+
+def _case_audit_workbench(
+    case_path: Path,
+    ledger_path: Path,
+    events: list[dict[str, Any]],
+    policy_digest: str,
+    manifest: dict[str, Any] | None,
+    case_binding: dict[str, Any] | None,
+    network_attempt: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if len(events) == 5:
+        sequence_state = "CLOSED_H0_SEQUENCE_VERIFIED"
+    elif len(events) == 3:
+        sequence_state = "INITIAL_H0_SEQUENCE_VERIFIED"
+    else:
+        sequence_state = "INVALID_SEQUENCE_BLOCKED"
+
+    files_audit = [
+        _path_audit_item(
+            "Case policy",
+            case_path / "policy.json",
+            state="PRIVATE_DIGEST_VERIFIED",
+            sha256=policy_digest,
+        ),
+        _path_audit_item("Event ledger", ledger_path, state="PRIVATE_REPLAY_VERIFIED"),
+        _path_audit_item(
+            "Network-attempt marker",
+            case_path / "network-attempt.json",
+            state=("PRIVATE_MARKER_VERIFIED" if network_attempt is not None else "NOT_ATTEMPTED"),
+            missing_state="NOT_ATTEMPTED",
+        ),
+    ]
+    if case_binding is not None:
+        files_audit.append(
+            _path_audit_item(
+                "Acquisition receipt",
+                case_path / "receipts" / f"{case_binding['acquisition_receipt_id']}.json",
+                state="PRIVATE_DIGEST_VERIFIED",
+                sha256=case_binding["acquisition_receipt_sha256"],
+            )
+        )
+    else:
+        files_audit.append(
+            {
+                "label": "Acquisition receipt",
+                "path": str(case_path / "receipts"),
+                "state": "NOT_PRESENT",
+                "sha256": None,
+                "size": None,
+            }
+        )
+    if manifest is not None:
+        files_audit.append(
+            _path_audit_item(
+                "Raw source artifact",
+                case_path / "evidence" / "sha256" / manifest["sha256"],
+                state="PRIVATE_SHA256_VERIFIED",
+                sha256=manifest["sha256"],
+            )
+        )
+    else:
+        files_audit.append(
+            {
+                "label": "Raw source artifact",
+                "path": str(case_path / "evidence" / "sha256"),
+                "state": "NOT_PRESENT",
+                "sha256": None,
+                "size": None,
+            }
+        )
+
+    return {
+        "case_dir": str(case_path),
+        "ledger_path": str(ledger_path),
+        "sequence_state": sequence_state,
+        "event_count": len(events),
+        "ledger_events": _ledger_event_audit(events),
+        "files": files_audit,
+        "read_gate": "PASSED",
+        "raw_artifact_preview": "NOT_EXPOSED",
+        "authority_state": "NO_AUTHORITY",
+    }
+
+
+def _real_asset_case_workbench(
+    policy: dict[str, Any],
+    policy_digest: str,
+    projection: ReadinProjection,
+    network_attempt: dict[str, Any] | None,
+    *,
+    case_path: Path,
+    ledger_path: Path,
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a read-only summary after the complete H0 case read gate succeeds."""
+
+    target = policy["target"]
+    observations = [
+        observation
+        for observation in projection.observations.values()
+        if target["entity_id"] in observation["subject_entities"]
+        and observation["provenance"]["adapter"] == "github-public-rest"
+    ]
+    observation = observations[0] if observations else None
+    manifest = (
+        projection.evidence.get(observation["source_artifact_id"])
+        if observation is not None
+        else None
+    )
+    case_binding = (
+        observation["content"]["structured_payload"]["case_binding"]
+        if observation is not None
+        else None
+    )
+
+    if observation is not None:
+        case_state = "VALIDATED_ARTIFACT_ADMITTED"
+        collection_result = "ARTIFACT_ADMITTED"
+    elif network_attempt is not None:
+        case_state = "VALIDATED_ATTEMPT_NO_ADMISSION"
+        collection_result = "NO_ARTIFACT_ADMITTED"
+    else:
+        case_state = "VALIDATED_NOT_ATTEMPTED"
+        collection_result = "NOT_ATTEMPTED"
+
+    custody_checks = [
+        {
+            "component": "Case policy",
+            "state": "DIGEST_VERIFIED",
+            "detail": f"sha256:{policy_digest}",
+        },
+        {
+            "component": "Ledger binding",
+            "state": "REPLAY_VERIFIED",
+            "detail": "Policy target and the closed H0 event sequence agree",
+        },
+        {
+            "component": "Network attempt",
+            "state": "MARKER_VERIFIED" if network_attempt is not None else "NOT_ATTEMPTED",
+            "detail": (
+                "One request budget reserved before transport"
+                if network_attempt is not None
+                else "No request marker exists"
+            ),
+        },
+        {
+            "component": "Acquisition receipt",
+            "state": "DIGEST_AND_BINDING_VERIFIED" if case_binding else "NOT_PRESENT",
+            "detail": (
+                f"Receipt {case_binding['acquisition_receipt_id']}"
+                if case_binding
+                else "No artifact was admitted"
+            ),
+        },
+        {
+            "component": "Raw source artifact",
+            "state": "SHA256_VERIFIED" if manifest else "NOT_PRESENT",
+            "detail": (
+                f"sha256:{manifest['sha256']}" if manifest else "No retained source artifact"
+            ),
+        },
+        {
+            "component": "Manifest and observation",
+            "state": "SOURCE_REDERIVED_AND_MATCHED" if observation else "NOT_PRESENT",
+            "detail": (
+                "Stored bytes re-parse to the admitted immutable observation"
+                if observation
+                else "No observation was admitted"
+            ),
+        },
+    ]
+
+    return {
+        "state": case_state,
+        "case_id": policy["case_id"],
+        "policy_id": policy["policy_id"],
+        "policy_sha256": policy_digest,
+        "declared_at": policy["declared_at"],
+        "purpose": deepcopy(policy["purpose"]),
+        "target": deepcopy(target),
+        "source": deepcopy(policy["source"]),
+        "budgets": {
+            **deepcopy(policy["budgets"]),
+            "network_requests_used": 1 if network_attempt is not None else 0,
+            "artifacts_admitted": len(observations),
+        },
+        "retention": deepcopy(policy["retention"]),
+        "minimization": deepcopy(policy["minimization"]),
+        "authority": deepcopy(policy["authority"]),
+        "collection": {
+            "result": collection_result,
+            "attempt_state": (
+                network_attempt["state"] if network_attempt is not None else "NOT_ATTEMPTED"
+            ),
+            "authorized_at": (
+                network_attempt["authorized_at"] if network_attempt is not None else None
+            ),
+        },
+        "evidence": (
+            {
+                "manifest_id": manifest["id"],
+                "receipt_id": case_binding["acquisition_receipt_id"],
+                "receipt_sha256": case_binding["acquisition_receipt_sha256"],
+                "artifact_sha256": manifest["sha256"],
+                "media_type": manifest["media_type"],
+                "size": manifest["size"],
+                "acquired_at": manifest["acquired_at"],
+                "http_status": 200,
+            }
+            if manifest is not None and case_binding is not None
+            else None
+        ),
+        "custody": {
+            "state": "FULL_CHAIN_VERIFIED",
+            "checks": custody_checks,
+        },
+        "audit": _case_audit_workbench(
+            case_path,
+            ledger_path,
+            events,
+            policy_digest,
+            manifest,
+            case_binding,
+            network_attempt,
+        ),
+        "authority_state": "NO_AUTHORITY",
+    }
+
+
 def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, Any]:
     view = projection.asset_view(entity_id)
     entity = view["entity"]
+    real_asset_case_binding = entity["attributes"].get("real_asset_case_binding")
     tracked = view["tracked_asset"]
     observation_count_by_frame: dict[str, int] = {}
     for observation in view["observations"]:
@@ -540,6 +914,14 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "state_version": tracked["epistemic_state_version"],
             "collection_profile": tracked["tracking"]["collection_profile"],
         },
+        "governance": {
+            "state": (
+                "REAL_ASSET_CASE_BINDING_DECLARED"
+                if real_asset_case_binding is not None
+                else "LEGACY_UNGOVERNED"
+            ),
+            "real_asset_case_binding": deepcopy(real_asset_case_binding),
+        },
         "counts": {
             "observations": len(view["observations"]),
             "claims": len(claims),
@@ -577,6 +959,9 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
         "claims": claims,
         "relations": relations,
         "evidence": {
+            "observations": [
+                _observation_workbench(observation) for observation in view["observations"]
+            ],
             "manifests": [
                 {
                     "id": item["id"],
@@ -584,6 +969,9 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
                     "source_uri": item["source"]["uri"],
                     "access_policy": item["access_policy"],
                     "sha256": item["sha256"],
+                    "media_type": item["media_type"],
+                    "size": item["size"],
+                    "acquired_at": item["acquired_at"],
                     "transformation_count": len(item["transformations"]),
                 }
                 for item in view["evidence_manifests"]
@@ -648,6 +1036,11 @@ def build_workbench_snapshot(
     """Build the closed, presentation-only workbench read model."""
 
     catalog = [_catalog_item(item) for item in projection.catalog_view()]
+    recorded_source_observations = [
+        observation
+        for observation in projection.observations.values()
+        if observation["provenance"]["adapter"] == "github-public-rest"
+    ]
     selected_id = asset_id or (catalog[0]["id"] if catalog else None)
     if selected_id is not None and selected_id not in projection.assets:
         raise WorkbenchError(f"unknown tracked asset: {selected_id}")
@@ -664,6 +1057,7 @@ def build_workbench_snapshot(
             "operational_use": "PROHIBITED",
             "writes": "DISABLED",
         },
+        "case": None,
         "epistemic_limits": {
             "coverage_state": "NOT_ESTABLISHED",
             "completeness_claim": "NOT_MADE",
@@ -676,8 +1070,14 @@ def build_workbench_snapshot(
             "trajectory_state": "NOT_SIMULATED",
             "empirical_validity_state": "NOT_ESTABLISHED",
             "consensus_state": "NOT_COMPUTED",
-            "collection_state": "NOT_STARTED",
-            "acquisition_state": "NOT_ATTEMPTED",
+            "collection_state": (
+                "RECORDED_USER_INVOKED_ONE_SHOT" if recorded_source_observations else "NOT_STARTED"
+            ),
+            "acquisition_state": (
+                "PUBLIC_SOURCE_ARTIFACT_ADMISSION_RECORDED"
+                if recorded_source_observations
+                else "NOT_ATTEMPTED"
+            ),
             "source_independence_state": "NOT_ESTABLISHED",
             "residual_state": (
                 "COMPUTED_DESCRIPTIVE_REFERENCE_ONLY"
@@ -699,15 +1099,59 @@ def build_ledger_workbench_snapshot(
 ) -> dict[str, Any]:
     """Replay one local ledger and build its read-only workbench view."""
 
-    return build_workbench_snapshot(EventLedger(ledger_path).projection(), asset_id)
+    path = Path(ledger_path)
+    events = EventLedger(path).read_events()
+    policy_path = path.parent / "policy.json"
+    policy_present = policy_path.exists() or policy_path.is_symlink()
+    if policy_present and path.name != "events.jsonl":
+        raise WorkbenchError("policy-bound case must use its canonical events.jsonl ledger")
+    projection = EventLedger(path).projection()
+    has_case_binding = any(
+        "real_asset_case_binding" in entity.get("attributes", {})
+        for entity in projection.entities.values()
+    )
+    if has_case_binding and not policy_present:
+        raise WorkbenchError("policy-bound case ledger is missing its required policy.json")
+    network_attempt = None
+    case_policy = None
+    case_policy_digest = None
+    if policy_present or has_case_binding:
+        from readin.real_asset_cases import (  # Local import avoids a module cycle.
+            RealAssetCaseError,
+            load_real_asset_case_policy,
+            validate_real_asset_case_read_access,
+        )
+
+        try:
+            _, case_policy, case_policy_digest = load_real_asset_case_policy(path.parent)
+            network_attempt = validate_real_asset_case_read_access(path.parent)
+        except RealAssetCaseError as error:
+            raise WorkbenchError(str(error)) from error
+    snapshot = build_workbench_snapshot(projection, asset_id)
+    if case_policy is not None and case_policy_digest is not None:
+        snapshot["case"] = _real_asset_case_workbench(
+            case_policy,
+            case_policy_digest,
+            projection,
+            network_attempt,
+            case_path=path.parent,
+            ledger_path=path,
+            events=events,
+        )
+    limits = snapshot["epistemic_limits"]
+    if network_attempt is not None and limits["acquisition_state"] == "NOT_ATTEMPTED":
+        limits["collection_state"] = "NETWORK_ATTEMPT_RESERVED_NO_ADMISSION"
+        limits["acquisition_state"] = "NO_ARTIFACT_ADMITTED"
+    return snapshot
 
 
 def validate_loopback_host(host: str) -> None:
-    """Reject non-loopback bindings for the bounded local workbench."""
+    """Require a numeric loopback bind address without resolver dependence."""
 
-    if host.lower() not in LOOPBACK_HOSTS:
+    if host not in LOOPBACK_BIND_HOSTS:
         raise WorkbenchError(
-            f"workbench host must be loopback-only ({', '.join(sorted(LOOPBACK_HOSTS))}): {host}"
+            "workbench bind host must be a numeric loopback address "
+            f"({', '.join(sorted(LOOPBACK_BIND_HOSTS))}): {host}"
         )
 
 
@@ -719,6 +1163,14 @@ class WorkbenchHTTPServer(ThreadingHTTPServer):
         if ":" in address[0]:
             self.address_family = socket.AF_INET6
         super().__init__(address, WorkbenchRequestHandler)
+        try:
+            bound_address = ipaddress.ip_address(self.server_address[0])
+        except ValueError as error:
+            self.server_close()
+            raise WorkbenchError("workbench listener did not bind a numeric IP address") from error
+        if not bound_address.is_loopback:
+            self.server_close()
+            raise WorkbenchError("workbench listener did not bind a loopback address")
 
 
 class WorkbenchRequestHandler(BaseHTTPRequestHandler):
@@ -727,6 +1179,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
     server: WorkbenchHTTPServer
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._request_authority_is_trusted():
+            return
         target = urlsplit(self.path)
         if target.path == "/api/workbench":
             asset_values = parse_qs(target.query).get("asset", [])
@@ -747,6 +1201,9 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
             "/index.html": ("index.html", "text/html; charset=utf-8"),
             "/assets/styles.css": ("styles.css", "text/css; charset=utf-8"),
             "/assets/app.js": ("app.js", "text/javascript; charset=utf-8"),
+            "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+            "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+            "/launch-guard.js": ("launch-guard.js", "text/javascript; charset=utf-8"),
         }
         if target.path not in assets:
             self._send_json(
@@ -765,21 +1222,63 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         self._send_bytes(resource.read_bytes(), media_type)
 
     def do_HEAD(self) -> None:  # noqa: N802
+        if not self._request_authority_is_trusted():
+            return
         self.send_response(HTTPStatus.NO_CONTENT)
         self._security_headers()
         self.end_headers()
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._request_authority_is_trusted():
+            return
         self._method_not_allowed()
 
     def do_PUT(self) -> None:  # noqa: N802
+        if not self._request_authority_is_trusted():
+            return
         self._method_not_allowed()
 
     def do_PATCH(self) -> None:  # noqa: N802
+        if not self._request_authority_is_trusted():
+            return
         self._method_not_allowed()
 
     def do_DELETE(self) -> None:  # noqa: N802
+        if not self._request_authority_is_trusted():
+            return
         self._method_not_allowed()
+
+    def _request_authority_is_trusted(self) -> bool:
+        host_values = self.headers.get_all("Host", [])
+        origin_values = self.headers.get_all("Origin", [])
+        try:
+            if len(host_values) != 1:
+                raise _RequestAuthorityError(
+                    "exactly one Host header is required", HTTPStatus.BAD_REQUEST
+                )
+            _parse_loopback_authority(
+                host_values[0],
+                server_port=self.server.server_port,
+                default_port=80,
+                field_name="Host",
+            )
+            if len(origin_values) > 1:
+                raise _RequestAuthorityError(
+                    "at most one Origin header is permitted", HTTPStatus.FORBIDDEN
+                )
+            if origin_values:
+                _validate_origin(origin_values[0], server_port=self.server.server_port)
+        except _RequestAuthorityError as error:
+            self._send_json(
+                {
+                    "error": str(error),
+                    "authority_state": "NO_AUTHORITY",
+                },
+                error.status,
+                include_body=self.command != "HEAD",
+            )
+            return False
+        return True
 
     def _method_not_allowed(self) -> None:
         self._send_json(
@@ -804,9 +1303,16 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         status: HTTPStatus = HTTPStatus.OK,
         *,
         extra_headers: dict[str, str] | None = None,
+        include_body: bool = True,
     ) -> None:
         body = json.dumps(value, sort_keys=True, ensure_ascii=False).encode("utf-8")
-        self._send_bytes(body, "application/json; charset=utf-8", status, extra_headers)
+        self._send_bytes(
+            body,
+            "application/json; charset=utf-8",
+            status,
+            extra_headers,
+            include_body=include_body,
+        )
 
     def _send_bytes(
         self,
@@ -814,6 +1320,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         media_type: str,
         status: HTTPStatus = HTTPStatus.OK,
         extra_headers: dict[str, str] | None = None,
+        *,
+        include_body: bool = True,
     ) -> None:
         self.send_response(status)
         self.send_header("Content-Type", media_type)
@@ -822,7 +1330,8 @@ class WorkbenchRequestHandler(BaseHTTPRequestHandler):
         for name, value in (extra_headers or {}).items():
             self.send_header(name, value)
         self.end_headers()
-        self.wfile.write(body)
+        if include_body:
+            self.wfile.write(body)
 
     def log_message(self, format: str, *args: object) -> None:
         """Keep normal local requests quiet; callers control operational logging."""
@@ -838,7 +1347,7 @@ def create_workbench_server(
 
     validate_loopback_host(host)
     path = Path(ledger_path)
-    EventLedger(path).projection()
+    build_ledger_workbench_snapshot(path)
     return WorkbenchHTTPServer((host, port), path)
 
 
@@ -847,12 +1356,23 @@ def serve_workbench(
     *,
     host: str = "127.0.0.1",
     port: int = 4173,
+    open_browser: bool = False,
 ) -> None:
     """Serve the workbench until interrupted."""
 
     server = create_workbench_server(ledger_path, host=host, port=port)
+    display_host = f"[{host}]" if ":" in host else host
+    url = f"http://{display_host}:{server.server_port}"
     try:
-        print(f"READIN workbench · NO_AUTHORITY · http://{host}:{server.server_port}")
+        print(f"READIN workbench · NO_AUTHORITY · {url}", flush=True)
+        if open_browser:
+            try:
+                opened = webbrowser.open(url, new=2)
+            except webbrowser.Error as error:
+                print(f"Browser launch failed ({error}). Open {url} manually.", flush=True)
+            else:
+                if not opened:
+                    print(f"Browser did not open automatically. Open {url} manually.", flush=True)
         server.serve_forever()
     except KeyboardInterrupt:
         pass

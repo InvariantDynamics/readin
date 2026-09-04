@@ -38,6 +38,15 @@ def test_observation_source_policy_must_match_manifest_and_frame() -> None:
         ReadinProjection.replay([*events[:-1], changed])
 
 
+def test_observation_epistemic_access_scope_must_match_source_policy() -> None:
+    events = phase0_events()
+    changed = deepcopy(events[-1])
+    changed["payload"]["observation"]["epistemic"]["access_scope"] = "LICENSED"
+
+    with pytest.raises(ProjectionError, match="access scope does not match source policy"):
+        ReadinProjection.replay([*events[:-1], changed])
+
+
 def test_duplicate_evidence_digest_is_rejected() -> None:
     events = phase0_events()
     duplicate = deepcopy(events[3])

@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://invariantdynamics.io/readin/schemas/v0.1/real-asset-case-policy.schema.json",
+  "title": "READIN bounded real-asset case policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_id",
+    "case_id",
+    "declared_at",
+    "purpose",
+    "target",
+    "source",
+    "budgets",
+    "retention",
+    "minimization",
+    "authority"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "readin.real-asset-case-policy.v0.1"
+    },
+    "policy_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "case_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "declared_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "purpose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "statement", "secondary_use"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "ASSET_INVENTORY",
+            "SELF_FOOTPRINT_AUDIT",
+            "SYSTEM_CAPABILITY_EVALUATION"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 1024
+        },
+        "secondary_use": {
+          "const": "PROHIBITED"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_id",
+        "entity_id",
+        "observer_frame_id",
+        "subject_class",
+        "asset_type",
+        "authorization_basis",
+        "ownership_claim",
+        "github"
+      ],
+      "properties": {
+        "target_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "entity_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "observer_frame_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "subject_class": {
+          "enum": ["PUBLIC_ORGANIZATION_ASSET", "USER_OWNED_ASSET"]
+        },
+        "asset_type": {
+          "const": "SOFTWARE_REPOSITORY"
+        },
+        "authorization_basis": {
+          "enum": ["PUBLIC_RESOURCE_SCOPE", "OWNERSHIP_ATTESTED"]
+        },
+        "ownership_claim": {
+          "enum": ["NOT_MADE", "USER_ATTESTED_NOT_VERIFIED"]
+        },
+        "github": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "repository", "request_url"],
+          "properties": {
+            "owner": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
+            },
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "request_url": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 512
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "subject_class": {"const": "PUBLIC_ORGANIZATION_ASSET"}
+            }
+          },
+          "then": {
+            "properties": {
+              "authorization_basis": {"const": "PUBLIC_RESOURCE_SCOPE"},
+              "ownership_claim": {"const": "NOT_MADE"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "subject_class": {"const": "USER_OWNED_ASSET"}
+            }
+          },
+          "then": {
+            "properties": {
+              "authorization_basis": {"const": "OWNERSHIP_ATTESTED"},
+              "ownership_claim": {"const": "USER_ATTESTED_NOT_VERIFIED"}
+            }
+          }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "connector",
+        "access_policy",
+        "allowed_host",
+        "exact_target_only",
+        "authentication_mode",
+        "read_only",
+        "redirect_policy",
+        "proxy_policy"
+      ],
+      "properties": {
+        "connector": {
+          "const": "GITHUB_PUBLIC_REPOSITORY_V0_1"
+        },
+        "access_policy": {
+          "const": "PUBLIC"
+        },
+        "allowed_host": {
+          "const": "api.github.com"
+        },
+        "exact_target_only": {
+          "const": true
+        },
+        "authentication_mode": {
+          "const": "NONE"
+        },
+        "read_only": {
+          "const": true
+        },
+        "redirect_policy": {
+          "const": "DENY"
+        },
+        "proxy_policy": {
+          "const": "DISABLED"
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collection_not_before",
+        "collection_not_after",
+        "max_network_requests",
+        "max_response_bytes",
+        "max_artifacts",
+        "max_relation_hops"
+      ],
+      "properties": {
+        "collection_not_before": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "collection_not_after": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "max_network_requests": {
+          "const": 1
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576
+        },
+        "max_artifacts": {
+          "const": 1
+        },
+        "max_relation_hops": {
+          "const": 0
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["delete_at", "max_days", "auto_extend", "review_required"],
+      "properties": {
+        "delete_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "max_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "auto_extend": {
+          "const": false
+        },
+        "review_required": {
+          "const": true
+        }
+      }
+    },
+    "minimization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_metadata_only",
+        "contributors",
+        "commit_authors",
+        "organization_members",
+        "issues_and_pull_requests",
+        "automatic_external_url_following",
+        "coverage_state",
+        "completeness_claim"
+      ],
+      "properties": {
+        "repository_metadata_only": {"const": true},
+        "contributors": {"const": "EXCLUDED"},
+        "commit_authors": {"const": "EXCLUDED"},
+        "organization_members": {"const": "EXCLUDED"},
+        "issues_and_pull_requests": {"const": "EXCLUDED"},
+        "automatic_external_url_following": {"const": "PROHIBITED"},
+        "coverage_state": {"const": "BOUNDED"},
+        "completeness_claim": {"const": "NOT_MADE"}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_authority",
+        "collection",
+        "account_mutation",
+        "contact",
+        "publication",
+        "automated_entity_merge",
+        "consequential_use"
+      ],
+      "properties": {
+        "record_authority": {"const": "NO_AUTHORITY"},
+        "collection": {"const": "READ_ONLY_EXACT_TARGET"},
+        "account_mutation": {"const": "NONE"},
+        "contact": {"const": "NONE"},
+        "publication": {"const": "NONE"},
+        "automated_entity_merge": {"const": false},
+        "consequential_use": {"const": "PROHIBITED"}
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

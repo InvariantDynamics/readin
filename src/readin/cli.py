@@ -60,6 +60,14 @@ from readin.readback_selection import (
     create_readback_selection_plan,
     execute_readback_selection,
 )
+from readin.real_asset_cases import (
+    LEDGER_FILENAME,
+    POLICY_FILENAME,
+    RealAssetCaseError,
+    collect_github_public_repository_case,
+    initialize_github_public_repository_case,
+    validate_real_asset_case_read_access,
+)
 from readin.residuals import ResidualRuntimeError, execute_residual_readback
 from readin.scenarios import (
     ScenarioRuntimeError,
@@ -69,7 +77,7 @@ from readin.scenarios import (
 from readin.store import EventLedger, LedgerError
 from readin.workbench import (
     WorkbenchError,
-    build_workbench_snapshot,
+    build_ledger_workbench_snapshot,
     serve_workbench,
 )
 
@@ -96,7 +104,32 @@ def _emit(value: Any) -> None:
 
 
 def _ledger(args: argparse.Namespace) -> EventLedger:
-    return EventLedger(Path(args.ledger))
+    ledger = EventLedger(Path(args.ledger))
+    policy_path = ledger.path.parent / POLICY_FILENAME
+    policy_present = policy_path.exists() or policy_path.is_symlink()
+    if policy_present and ledger.path.name != LEDGER_FILENAME:
+        raise RealAssetCaseError("policy-bound case must use its canonical events.jsonl ledger")
+    case_binding_present = False
+    if ledger.path.is_file() and not ledger.path.is_symlink():
+        case_binding_present = any(
+            event["event_type"] == "entity.created"
+            and "real_asset_case_binding" in event["payload"]["entity"].get("attributes", {})
+            for event in ledger.read_events()
+        )
+    if case_binding_present and not policy_present:
+        raise RealAssetCaseError("policy-bound case ledger is missing its required policy.json")
+    if policy_present:
+        validate_real_asset_case_read_access(ledger.path.parent)
+        read_only_command = args.command.startswith("show-") or args.command in {
+            "list-assets",
+            "run-cartographic-query",
+            "workbench",
+        }
+        if not read_only_command:
+            raise RealAssetCaseError(
+                "policy-bound case ledgers accept writes only through their declared case connector"
+            )
+    return ledger
 
 
 def _add_ledger_argument(parser: argparse.ArgumentParser) -> None:
@@ -112,6 +145,41 @@ def _build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser("init", help="Create an empty local event ledger")
     _add_ledger_argument(init_parser)
+
+    real_case_parser = subparsers.add_parser(
+        "init-github-public-repository-case",
+        help="Create an owner-local, policy-bound case for one public GitHub repository",
+    )
+    real_case_parser.add_argument("--case-dir", required=True)
+    real_case_parser.add_argument("--owner", required=True)
+    real_case_parser.add_argument("--repository", required=True)
+    real_case_parser.add_argument("--purpose", required=True)
+    real_case_parser.add_argument(
+        "--purpose-kind",
+        choices=(
+            "ASSET_INVENTORY",
+            "SELF_FOOTPRINT_AUDIT",
+            "SYSTEM_CAPABILITY_EVALUATION",
+        ),
+        default="SYSTEM_CAPABILITY_EVALUATION",
+    )
+    real_case_parser.add_argument(
+        "--subject-class",
+        choices=("PUBLIC_ORGANIZATION_ASSET", "USER_OWNED_ASSET"),
+        default="PUBLIC_ORGANIZATION_ASSET",
+    )
+    real_case_parser.add_argument("--retention-days", type=int, default=30)
+    real_case_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help="Attest that the exact target, purpose, and collection limits are authorized",
+    )
+
+    collect_real_case_parser = subparsers.add_parser(
+        "collect-github-public-repository-case",
+        help="Make the case-authorized one-shot credential-free GitHub metadata request",
+    )
+    collect_real_case_parser.add_argument("--case-dir", required=True)
 
     entity_parser = subparsers.add_parser(
         "create-entity", help="Create and optionally track an entity"
@@ -743,14 +811,54 @@ def _build_parser() -> argparse.ArgumentParser:
         "workbench",
         help="Serve the read-only asset workbench on a loopback interface",
     )
-    _add_ledger_argument(workbench_parser)
+    workbench_source = workbench_parser.add_mutually_exclusive_group(required=True)
+    workbench_source.add_argument(
+        "--ledger",
+        help="Path to the local JSONL event ledger",
+    )
+    workbench_source.add_argument(
+        "--case-dir",
+        help="Path to a case directory containing events.jsonl",
+    )
     workbench_parser.add_argument("--host", default="127.0.0.1")
     workbench_parser.add_argument("--port", type=int, default=4173)
+    workbench_parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the loopback workbench in the default browser after validation",
+    )
 
     return parser
 
 
 def _run(args: argparse.Namespace) -> Any:
+    if args.command == "init-github-public-repository-case":
+        return initialize_github_public_repository_case(
+            args.case_dir,
+            args.owner,
+            args.repository,
+            args.purpose,
+            attested=args.attest,
+            purpose_kind=args.purpose_kind,
+            subject_class=args.subject_class,
+            retention_days=args.retention_days,
+        )
+    if args.command == "collect-github-public-repository-case":
+        return collect_github_public_repository_case(args.case_dir)
+
+    if args.command == "workbench":
+        ledger_path = Path(args.ledger) if args.ledger else Path(args.case_dir) / LEDGER_FILENAME
+        serve_workbench(
+            ledger_path,
+            host=args.host,
+            port=args.port,
+            open_browser=args.open_browser,
+        )
+        return {
+            "status": "stopped",
+            "authority_state": "NO_AUTHORITY",
+        }
+
     ledger = _ledger(args)
     if args.command == "init":
         ledger.initialize()
@@ -780,13 +888,6 @@ def _run(args: argparse.Namespace) -> Any:
             ledger.append(tracking_event)
             events.append(tracking_event)
         return {"entity_id": entity_id, "events": events, "authority_state": "NO_AUTHORITY"}
-
-    if args.command == "workbench":
-        serve_workbench(ledger.path, host=args.host, port=args.port)
-        return {
-            "status": "stopped",
-            "authority_state": "NO_AUTHORITY",
-        }
 
     if args.command == "start-tracking":
         event = create_tracking_started(
@@ -1243,7 +1344,7 @@ def _run(args: argparse.Namespace) -> Any:
     if args.command == "list-assets":
         return projection.catalog_view()
     if args.command == "show-workbench":
-        return build_workbench_snapshot(projection, args.asset)
+        return build_ledger_workbench_snapshot(ledger.path, args.asset)
     raise AssertionError(f"unhandled command: {args.command}")
 
 
@@ -1266,6 +1367,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         KeyError,
         LedgerError,
         ProjectionError,
+        RealAssetCaseError,
         ReadbackSelectionError,
         ResidualRuntimeError,
         ScenarioRuntimeError,

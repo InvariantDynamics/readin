@@ -135,10 +135,100 @@ user-defined conditional structures: likelihood is `NOT_COMPUTED`, trajectories 
 structural heuristic over user-supplied, unvalidated expected effects; it does not compute expected
 information gain, source feasibility, source independence, or probabilities. The slice performs no
 network collection, entity merging, automated claim extraction, learned or external forecasting,
-targeting, or external action.
+targeting, or external action. The separately bounded H0 real-asset path described below is the sole
+network exception; it does not alter any fitter, belief, scenario, identity, or action boundary.
 A claim remains unresolved even when evidence is linked, and repeated dependent evidence is never
 counted as independent corroboration. Candidate resolution is review history only: it never performs
 a canonical entity merge.
+
+## Experimental real-asset H0
+
+H0 can acquire one real public GitHub repository metadata response into a local READIN case. This is
+an exact-target evidence-custody test, not an open-ended search or people-investigation feature.
+
+The case policy is application-write-once and digest-bound. It permits one user-invoked,
+credential-free request,
+one artifact, zero relation hops, a maximum 512 KiB response, a 24-hour collection window, and a
+maximum 30-day retention review. Proxies, redirects, retries, schedules, cookies, tokens, account
+writes, person targeting, person-profile construction, and automatic external-link traversal are
+absent. Raw GitHub response bytes can contain incidental public owner-account metadata. The
+allowlisted ledger projection retains only the owner's login, numeric account ID, and account type
+needed to bind and classify the repository target; it does not collect contributors or traverse to
+people. Raw bytes are stored in an owner-only content-addressed vault, and the ledger retains
+`NO_AUTHORITY`, `BOUNDED` coverage, and `NOT_MADE` completeness.
+
+For a completed case, normal CLI and workbench reads revalidate the policy and request marker,
+re-hash the raw artifact, verify the digest-bound acquisition receipt, and reproduce the allowlisted
+observation from the stored bytes. A missing or contradictory custody component fails closed.
+
+Generic mutating READIN commands cannot append to a policy-bound case ledger. The workbench and
+normal read commands also fail closed after the retention deadline or if the policy is missing.
+
+READIN reserves the one-request budget before opening the network connection. A DNS, TLS, HTTP, or
+validation failure therefore consumes that case; initialize a reviewed new case rather than retrying
+the failed one. If the durable reservation exists without an admitted artifact, the workbench reports
+`NETWORK_ATTEMPT_RESERVED_NO_ADMISSION` and `NO_ARTIFACT_ADMITTED`; the reservation alone does not
+prove that transport completed.
+
+The connector applies one 15-second aggregate monotonic admission budget beginning before its DNS
+preflight, deducts elapsed DNS/connect time from the HTTP timeout, and applies shrinking socket
+timeouts to response-body reads. The policy cutoff is also passed into the connector and is exclusive:
+a response completing at or after that instant is rejected. Python's synchronous resolver and
+standard-library HTTP header processing cannot be forcibly interrupted by this in-process check; if
+either returns late, READIN closes/rejects the response and admits no artifact. This is a no-late-
+admission control, not a hard process-runtime guarantee.
+
+The default subject class is `PUBLIC_ORGANIZATION_ASSET`, which makes no ownership claim. Use
+`USER_OWNED_ASSET` only for an asset you own or administer; READIN records that as
+`USER_ATTESTED_NOT_VERIFIED`, not proof of ownership.
+
+```shell
+cd /path/to/readin
+uv sync --dev
+
+READIN_CASE_DIR="$HOME/.local/share/readin/cases/invariantdynamics-readin"
+
+uv run readin init-github-public-repository-case \
+  --case-dir "$READIN_CASE_DIR" \
+  --owner InvariantDynamics \
+  --repository readin \
+  --purpose "Evaluate one bounded public repository acquisition through READIN" \
+  --subject-class PUBLIC_ORGANIZATION_ASSET \
+  --retention-days 30 \
+  --attest
+
+uv run readin collect-github-public-repository-case \
+  --case-dir "$READIN_CASE_DIR"
+
+uv run readin show-workbench \
+  --ledger "$READIN_CASE_DIR/events.jsonl"
+
+uv run readin workbench \
+  --case-dir "$READIN_CASE_DIR" \
+  --host 127.0.0.1 \
+  --port 4173 \
+  --open-browser
+```
+
+The command validates the case, starts the loopback-only service, and opens
+`http://127.0.0.1:4173`. Keep that Terminal window open while using the workbench; press
+`Control-C` there to stop it. Do not open `src/readin/workbench_assets/index.html` directly: it is a
+served interface asset, not a standalone application. Direct file opening now displays a launch
+diagnostic instead of a broken shell.
+
+For a policy-bound H0 ledger, the workbench opens on the **Case** view. That view reports the
+declared purpose, exact target, source restrictions, request and artifact budgets, retention review,
+minimization exclusions, validated custody chain, and the allowlisted repository observation.
+**Evidence** shows admitted observations and manifests; **Timeline** shows the asset-affecting event
+history. These are read models over validated local records, not new collection or truth claims.
+
+The command stores real source data, so put the case outside Git and cloud-synchronized folders on
+a FileVault-enabled Mac. The retention timestamp stops later collection but does not auto-delete
+the case. Review and remove the exact case directory yourself when it is no longer needed. A second
+acquisition requires a new case in H0.
+
+See [ADR 0017](docs/adr/0017-bounded-public-repository-acquisition.md) and
+[Security](SECURITY.md) before adding any other connector or target class.
 
 ## Quick start
 
@@ -234,11 +324,12 @@ uv run readin run-residual-readback --ledger .readin/events.jsonl \
 uv run readin show-residual-readback --ledger .readin/events.jsonl \
   --readback <readback-id>
 uv run readin show-workbench --ledger .readin/events.jsonl --asset <entity-id>
-uv run readin workbench --ledger .readin/events.jsonl --host 127.0.0.1 --port 4173
+uv run readin workbench --ledger .readin/events.jsonl --host 127.0.0.1 --port 4173 --open-browser
 ```
 
 Data commands emit JSON so their identifiers can be captured by scripts; `workbench` starts the
-local server until interrupted. Run `uv run readin --help` for the complete interface.
+local server until interrupted. `--case-dir` may be used instead of `--ledger` when the ledger is
+the case's canonical `events.jsonl`. Run `uv run readin --help` for the complete interface.
 
 ## Governing rules
 
