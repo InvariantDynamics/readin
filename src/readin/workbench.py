@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from readin.connector_grants import CONNECTOR_GRANT_OBSERVATION_TYPE
 from readin.projection import ProjectionError, ReadinProjection
+from readin.source_capabilities import IMPORTED_SOURCE_ADAPTERS, build_source_capabilities
 from readin.store import EventLedger, LedgerError
 
 WORKBENCH_SCHEMA_VERSION = "readin.workbench.v0.1"
@@ -112,13 +114,125 @@ def _claim_object_label(projection: ReadinProjection, value: dict[str, Any]) -> 
     return json.dumps(value["value"], sort_keys=True, ensure_ascii=False)
 
 
+def _asset_catalog_binding(entity: dict[str, Any]) -> dict[str, Any] | None:
+    binding = entity["attributes"].get("asset_catalog_binding")
+    return binding if isinstance(binding, dict) else None
+
+
+def _connector_intent(binding: dict[str, Any] | None) -> dict[str, Any] | None:
+    if binding is None:
+        return None
+    connector = binding.get("connector_intent")
+    return connector if isinstance(connector, dict) else None
+
+
+def _connector_grant_payload(observation: dict[str, Any]) -> dict[str, Any] | None:
+    if observation["observation_type"] != CONNECTOR_GRANT_OBSERVATION_TYPE:
+        return None
+    payload = observation["content"]["structured_payload"]
+    grant = payload.get("connector_grant") if isinstance(payload, dict) else None
+    return grant if isinstance(grant, dict) else None
+
+
+def _latest_connector_grant(observations: list[dict[str, Any]]) -> dict[str, Any] | None:
+    grants = [
+        {"observation": observation, "grant": grant}
+        for observation in observations
+        if (grant := _connector_grant_payload(observation)) is not None
+    ]
+    if not grants:
+        return None
+    item = grants[-1]
+    grant = item["grant"]
+    observation = item["observation"]
+    return {
+        "observation_id": observation["id"],
+        "source_artifact_id": observation["source_artifact_id"],
+        "observed_at": observation["observed_at"],
+        "grant_id": grant["grant_id"],
+        "grant_kind": grant["grant"]["grant_kind"],
+        "grant_state": grant["grant"]["grant_state"],
+        "access_mode": grant["grant"]["access_mode"],
+        "connector_kind": grant["provider"]["connector_kind"],
+        "connector_name": grant["provider"]["connector_name"],
+        "connector_version": grant["provider"]["connector_version"],
+        "terms_review_state": grant["provider"]["terms_review_state"],
+        "scope_count": len(grant["scopes"]),
+        "allowed_observation_type_count": len(grant["allowed_observation_types"]),
+        "scopes": deepcopy(grant["scopes"]),
+        "allowed_observation_types": deepcopy(grant["allowed_observation_types"]),
+        "retention": deepcopy(grant["retention"]),
+        "revocation": deepcopy(grant["revocation"]),
+        "audit": deepcopy(grant["audit"]),
+        "authority_state": grant["authority_state"],
+        "collection_state": grant["collection_state"],
+        "credential_material": grant["credential_material"],
+        "credential_storage": grant["credential_storage"],
+        "oauth_state": grant["oauth_state"],
+        "live_collection_state": grant["live_collection_state"],
+        "network_access": grant["network_access"],
+        "external_action_state": grant["external_action_state"],
+        "people_targeting": grant["people_targeting"],
+        "activation_requirement": grant["activation_requirement"],
+        "source_digest_sha256": grant["source_digest_sha256"],
+    }
+
+
+def _source_export_summaries(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    batches: dict[str, dict[str, Any]] = {}
+    for observation in observations:
+        if observation["provenance"]["adapter"] not in IMPORTED_SOURCE_ADAPTERS:
+            continue
+        receipt = observation["content"]["structured_payload"].get("source_export")
+        if not isinstance(receipt, dict) or not isinstance(receipt.get("export_id"), str):
+            continue
+        export_id = receipt["export_id"]
+        if export_id not in batches:
+            batches[export_id] = {
+                "export_id": export_id,
+                "grant_id": receipt.get("grant_id"),
+                "source_sha256": receipt.get("source_sha256"),
+                "source_size": receipt.get("source_size"),
+                "parser": receipt.get("parser"),
+                "identity_binding": receipt.get("identity_binding"),
+                "selected_source_fields": receipt.get("selected_source_fields", []),
+                "excluded_field_count": receipt.get("excluded_field_count"),
+                "archive_entries_skipped": receipt.get("archive_entries_skipped"),
+                "expected_observation_count": receipt.get("observation_count"),
+                "observation_count": 0,
+                "observation_ids": [],
+                "observation_types": [],
+                "imported_at": observation["provenance"]["acquisition_time"],
+                "source_artifact_id": observation["source_artifact_id"],
+            }
+        batch = batches[export_id]
+        batch["observation_count"] += 1
+        batch["observation_ids"].append(observation["id"])
+        if observation["observation_type"] not in batch["observation_types"]:
+            batch["observation_types"].append(observation["observation_type"])
+    for batch in batches.values():
+        batch["state"] = (
+            "IMPORTED"
+            if batch["observation_count"] == batch["expected_observation_count"]
+            else "PARTIAL_IMPORT"
+        )
+    return list(batches.values())
+
+
 def _catalog_item(item: dict[str, Any]) -> dict[str, Any]:
     entity = item["entity"]
     tracked = item["tracked_asset"]
+    binding = _asset_catalog_binding(entity)
+    connector = _connector_intent(binding)
     return {
         "id": entity["id"],
         "canonical_name": entity["canonical_name"],
         "entity_type": entity["type"],
+        "asset_class": binding.get("asset_class") if binding else None,
+        "platform": binding.get("platform") if binding else None,
+        "connection_state": connector.get("connection_state") if connector else None,
+        "connector_kind": connector.get("connector_kind") if connector else None,
+        "live_collection_state": connector.get("live_collection_state") if connector else None,
         "priority": tracked["tracking"]["priority"],
         "state_version": tracked["epistemic_state_version"],
         "counts": {
@@ -128,6 +242,32 @@ def _catalog_item(item: dict[str, Any]) -> dict[str, Any]:
             "hypotheses": item["hypothesis_count"],
             "scenarios": item["scenario_count"],
         },
+        "authority_state": "NO_AUTHORITY",
+    }
+
+
+def _asset_catalog_workbench_summary(catalog: list[dict[str, Any]]) -> dict[str, Any]:
+    catalog_items = [item for item in catalog if item["asset_class"] is not None]
+    class_counts: dict[str, int] = {}
+    connection_counts: dict[str, int] = {}
+    connector_counts: dict[str, int] = {}
+    for item in catalog_items:
+        class_counts[item["asset_class"]] = class_counts.get(item["asset_class"], 0) + 1
+        connection_state = item["connection_state"] or "UNKNOWN"
+        connection_counts[connection_state] = connection_counts.get(connection_state, 0) + 1
+        connector_kind = item["connector_kind"] or "UNKNOWN"
+        connector_counts[connector_kind] = connector_counts.get(connector_kind, 0) + 1
+    return {
+        "state": ("LOCAL_MANIFEST_ASSET_CATALOG_PRESENT" if catalog_items else "NOT_PRESENT"),
+        "asset_count": len(catalog_items),
+        "asset_class_counts": dict(sorted(class_counts.items())),
+        "connection_state_counts": dict(sorted(connection_counts.items())),
+        "connector_kind_counts": dict(sorted(connector_counts.items())),
+        "credential_state": "NONE",
+        "live_collection_state": "DISABLED",
+        "network_access": False,
+        "external_action_state": "PROHIBITED",
+        "people_targeting": "PROHIBITED",
         "authority_state": "NO_AUTHORITY",
     }
 
@@ -431,6 +571,9 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
     view = projection.asset_view(entity_id)
     entity = view["entity"]
     real_asset_case_binding = entity["attributes"].get("real_asset_case_binding")
+    asset_catalog_binding = _asset_catalog_binding(entity)
+    connector_intent = _connector_intent(asset_catalog_binding)
+    latest_connector_grant = _latest_connector_grant(view["observations"])
     tracked = view["tracked_asset"]
     observation_count_by_frame: dict[str, int] = {}
     for observation in view["observations"]:
@@ -918,7 +1061,53 @@ def _asset_workbench(projection: ReadinProjection, entity_id: str) -> dict[str, 
             "state": (
                 "REAL_ASSET_CASE_BINDING_DECLARED"
                 if real_asset_case_binding is not None
-                else "LEGACY_UNGOVERNED"
+                else (
+                    "ASSET_CATALOG_BINDING_DECLARED"
+                    if asset_catalog_binding is not None
+                    else "LEGACY_UNGOVERNED"
+                )
+            ),
+            "asset_catalog_binding": deepcopy(asset_catalog_binding),
+            "connector_intent": deepcopy(connector_intent),
+            "connector_grant": deepcopy(latest_connector_grant),
+            "source_exports": _source_export_summaries(view["observations"]),
+            "source_setup": (
+                {
+                    "asset_class": asset_catalog_binding["asset_class"],
+                    "platform": asset_catalog_binding["platform"],
+                    "account_identifier": asset_catalog_binding["account_identifier"],
+                    "source_uri": asset_catalog_binding["source_uri"],
+                    "authorization_basis": asset_catalog_binding["authorization_basis"],
+                    "collection_mode": asset_catalog_binding["collection_mode"],
+                    "connector_kind": connector_intent["connector_kind"],
+                    "connection_state": connector_intent["connection_state"],
+                    "credential_state": connector_intent["credential_state"],
+                    "oauth_state": connector_intent["oauth_state"],
+                    "terms_review_state": connector_intent["terms_review_state"],
+                    "live_collection_state": connector_intent["live_collection_state"],
+                    "network_access": asset_catalog_binding["authority"]["network_access"],
+                    "external_action_state": connector_intent["external_action_state"],
+                    "source_digest_sha256": asset_catalog_binding["source_digest_sha256"],
+                    "owner_attestation": asset_catalog_binding["ownership_attestation"],
+                    "people_targeting": asset_catalog_binding["authority"]["people_targeting"],
+                    "connector_grant_state": (
+                        latest_connector_grant["grant_state"]
+                        if latest_connector_grant is not None
+                        else "NOT_RECORDED"
+                    ),
+                    "connector_grant_id": (
+                        latest_connector_grant["grant_id"]
+                        if latest_connector_grant is not None
+                        else None
+                    ),
+                    "connector_grant_access_mode": (
+                        latest_connector_grant["access_mode"]
+                        if latest_connector_grant is not None
+                        else None
+                    ),
+                }
+                if asset_catalog_binding is not None and connector_intent is not None
+                else None
             ),
             "real_asset_case_binding": deepcopy(real_asset_case_binding),
         },
@@ -1041,6 +1230,11 @@ def build_workbench_snapshot(
         for observation in projection.observations.values()
         if observation["provenance"]["adapter"] == "github-public-rest"
     ]
+    local_source_observations = [
+        observation
+        for observation in projection.observations.values()
+        if observation["provenance"]["adapter"] in IMPORTED_SOURCE_ADAPTERS
+    ]
     selected_id = asset_id or (catalog[0]["id"] if catalog else None)
     if selected_id is not None and selected_id not in projection.assets:
         raise WorkbenchError(f"unknown tracked asset: {selected_id}")
@@ -1057,6 +1251,8 @@ def build_workbench_snapshot(
             "operational_use": "PROHIBITED",
             "writes": "DISABLED",
         },
+        "asset_catalog": _asset_catalog_workbench_summary(catalog),
+        "source_capabilities": build_source_capabilities(projection),
         "case": None,
         "epistemic_limits": {
             "coverage_state": "NOT_ESTABLISHED",
@@ -1071,11 +1267,17 @@ def build_workbench_snapshot(
             "empirical_validity_state": "NOT_ESTABLISHED",
             "consensus_state": "NOT_COMPUTED",
             "collection_state": (
-                "RECORDED_USER_INVOKED_ONE_SHOT" if recorded_source_observations else "NOT_STARTED"
+                "RECORDED_USER_INVOKED_ONE_SHOT"
+                if recorded_source_observations
+                else "RECORDED_LOCAL_IMPORT"
+                if local_source_observations
+                else "NOT_STARTED"
             ),
             "acquisition_state": (
                 "PUBLIC_SOURCE_ARTIFACT_ADMISSION_RECORDED"
                 if recorded_source_observations
+                else "LOCAL_SOURCE_IMPORT_RECORDED"
+                if local_source_observations
                 else "NOT_ATTEMPTED"
             ),
             "source_independence_state": "NOT_ESTABLISHED",

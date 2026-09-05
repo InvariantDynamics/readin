@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.readin.dev/v0.1/asset-catalog-source.schema.json",
+  "title": "READIN Asset Catalog Source v0.1",
+  "description": "Closed local manifest for declaring user-owned or otherwise authorized assets before any live connector exists.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "catalog_id",
+    "catalog_name",
+    "declared_at",
+    "owner",
+    "purpose",
+    "authority",
+    "source",
+    "assets"
+  ],
+  "properties": {
+    "schema_version": { "const": "readin.asset-catalog-source.v0.1" },
+    "catalog_id": { "$ref": "#/$defs/uuid" },
+    "catalog_name": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "declared_at": { "$ref": "#/$defs/timestamp" },
+    "owner": { "$ref": "#/$defs/owner" },
+    "purpose": { "$ref": "#/$defs/purpose" },
+    "authority": { "$ref": "#/$defs/authority" },
+    "source": { "$ref": "#/$defs/source" },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/declaredAsset" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "nullableUri": {
+      "oneOf": [
+        { "type": "string", "format": "uri", "maxLength": 2048 },
+        { "type": "null" }
+      ]
+    },
+    "owner": {
+      "type": "object",
+      "required": ["label", "attestation", "scope"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "attestation": { "const": "USER_ATTESTED_NOT_VERIFIED" },
+        "scope": { "const": "SELF_OR_CONTROLLED_ASSETS_ONLY" }
+      },
+      "additionalProperties": false
+    },
+    "purpose": {
+      "type": "object",
+      "required": ["kind", "statement", "secondary_use"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "PERSONAL_ASSET_CATALOG",
+            "SELF_FOOTPRINT_AUDIT",
+            "SYSTEM_CAPABILITY_EVALUATION"
+          ]
+        },
+        "statement": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "secondary_use": { "const": "PROHIBITED" }
+      },
+      "additionalProperties": false
+    },
+    "authority": {
+      "type": "object",
+      "required": [
+        "state",
+        "collection",
+        "external_actions",
+        "credential_storage",
+        "network_access",
+        "people_targeting"
+      ],
+      "properties": {
+        "state": { "const": "NO_AUTHORITY" },
+        "collection": { "const": "NOT_GRANTED" },
+        "external_actions": { "const": "PROHIBITED" },
+        "credential_storage": { "const": "PROHIBITED" },
+        "network_access": { "const": false },
+        "people_targeting": { "const": "PROHIBITED" }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "kind",
+        "network_access",
+        "credential_material",
+        "path_retention"
+      ],
+      "properties": {
+        "kind": { "const": "USER_DECLARED_LOCAL_MANIFEST" },
+        "network_access": { "const": false },
+        "credential_material": { "const": "ABSENT" },
+        "path_retention": { "const": "NOT_RECORDED_IN_LEDGER" }
+      },
+      "additionalProperties": false
+    },
+    "declaredAsset": {
+      "type": "object",
+      "required": [
+        "asset_class",
+        "display_name",
+        "platform",
+        "account_identifier",
+        "source_uri",
+        "authorization_basis",
+        "collection_mode",
+        "connector_intent"
+      ],
+      "properties": {
+        "asset_class": {
+          "enum": [
+            "SOCIAL_ACCOUNT",
+            "ORGANIZATION_ACCOUNT",
+            "SOFTWARE_REPOSITORY",
+            "WEB_PROPERTY",
+            "DOCUMENT_COLLECTION",
+            "EMAIL_ACCOUNT",
+            "CALENDAR_ACCOUNT",
+            "FINANCIAL_ACCOUNT",
+            "DEVICE",
+            "LOCAL_FILE_COLLECTION",
+            "OTHER"
+          ]
+        },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "platform": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "account_identifier": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "source_uri": { "$ref": "#/$defs/nullableUri" },
+        "authorization_basis": {
+          "enum": [
+            "USER_OWNED_ACCOUNT_ATTESTED",
+            "USER_ADMINISTERED_ASSET_ATTESTED",
+            "PUBLIC_SELF_PRESENTATION",
+            "OTHERWISE_AUTHORIZED_ATTESTED"
+          ]
+        },
+        "collection_mode": {
+          "enum": [
+            "MANUAL_ENTRY_ONLY",
+            "LOCAL_EXPORT_IMPORT_ONLY",
+            "API_CONNECTION_REQUIRES_SEPARATE_GRANT"
+          ]
+        },
+        "connector_intent": { "$ref": "#/$defs/connectorIntent" }
+      },
+      "additionalProperties": false
+    },
+    "connectorIntent": {
+      "type": "object",
+      "required": [
+        "connector_kind",
+        "connection_state",
+        "credential_state",
+        "oauth_state",
+        "live_collection_state",
+        "external_action_state",
+        "terms_review_state"
+      ],
+      "properties": {
+        "connector_kind": {
+          "enum": [
+            "MANUAL",
+            "LOCAL_EXPORT",
+            "OAUTH_API",
+            "PUBLIC_WEB",
+            "GITHUB_PUBLIC",
+            "GOOGLE_TAKEOUT",
+            "SOCIAL_EXPORT",
+            "BROKERAGE_EXPORT",
+            "EMAIL_EXPORT",
+            "CALENDAR_EXPORT"
+          ]
+        },
+        "connection_state": {
+          "enum": [
+            "DECLARED_NOT_CONNECTED",
+            "EXPORT_IMPORT_READY",
+            "OAUTH_REQUIRED_NOT_REQUESTED",
+            "LIVE_CONNECTION_DISABLED"
+          ]
+        },
+        "credential_state": { "const": "NONE" },
+        "oauth_state": { "enum": ["NOT_REQUIRED", "NOT_REQUESTED"] },
+        "live_collection_state": { "const": "DISABLED" },
+        "external_action_state": { "const": "PROHIBITED" },
+        "terms_review_state": {
+          "enum": [
+            "NOT_REVIEWED",
+            "USER_ATTESTED_ALLOWED",
+            "REQUIRES_REVIEW"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

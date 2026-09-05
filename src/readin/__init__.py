@@ -1,6 +1,24 @@
 """READIN Phase 0 through Phase 8G reference runtime."""
 
+from readin.asset_catalog import (
+    AssetCatalogContractError,
+    AssetCatalogError,
+    build_asset_catalog_events,
+    import_asset_catalog_source,
+    load_asset_catalog_source,
+    load_asset_catalog_source_schema,
+    validate_asset_catalog_source,
+)
 from readin.belief import BeliefRuntimeError, execute_belief_revision
+from readin.connector_grants import (
+    ConnectorGrantContractError,
+    ConnectorGrantError,
+    build_connector_grant_events,
+    import_connector_grant_source,
+    load_connector_grant_source,
+    load_connector_grant_source_schema,
+    validate_connector_grant_source,
+)
 from readin.contracts import ContractViolation, validate_event
 from readin.discrimination import (
     DiscriminationRuntimeError,
@@ -59,6 +77,20 @@ from readin.forecasting import (
     create_forecast_evaluation_design,
     execute_frozen_forecast_baseline,
 )
+from readin.local_source_exports import (
+    LocalSourceExportError,
+    build_local_source_export_events,
+    import_local_source_export,
+    load_local_source_export,
+    load_local_source_export_schema,
+    validate_local_source_export,
+)
+from readin.native_source_exports import (
+    NativeSourceExportError,
+    import_native_source_export,
+    parse_native_source,
+    prepare_native_source_grant,
+)
 from readin.projection import ProjectionError, ReadinProjection
 from readin.readback_selection import (
     ReadbackSelectionError,
@@ -71,12 +103,17 @@ from readin.scenarios import (
     create_bounded_scenario,
     execute_scenario,
 )
+from readin.source_capabilities import build_source_capabilities
 from readin.store import EventLedger, LedgerError
 from readin.workbench import WorkbenchError, build_workbench_snapshot, create_workbench_server
 
 __all__ = [
     "ContractViolation",
+    "AssetCatalogContractError",
+    "AssetCatalogError",
     "BeliefRuntimeError",
+    "ConnectorGrantContractError",
+    "ConnectorGrantError",
     "DiscriminationRuntimeError",
     "EventLedger",
     "FitterRuntimeError",
@@ -87,11 +124,24 @@ __all__ = [
     "ForecastValidityError",
     "ReadbackSelectionError",
     "LedgerError",
+    "LocalSourceExportError",
+    "NativeSourceExportError",
+    "import_native_source_export",
+    "parse_native_source",
+    "prepare_native_source_grant",
+    "build_source_capabilities",
+    "build_local_source_export_events",
+    "import_local_source_export",
+    "load_local_source_export",
+    "load_local_source_export_schema",
+    "validate_local_source_export",
     "ProjectionError",
     "ReadinProjection",
     "ResidualRuntimeError",
     "ScenarioRuntimeError",
     "WorkbenchError",
+    "build_asset_catalog_events",
+    "build_connector_grant_events",
     "build_workbench_snapshot",
     "create_belief_edge_created",
     "create_belief_revision_completed",
@@ -139,6 +189,14 @@ __all__ = [
     "execute_belief_revision",
     "execute_discrimination_plan",
     "execute_scenario",
+    "import_asset_catalog_source",
+    "import_connector_grant_source",
+    "load_asset_catalog_source",
+    "load_asset_catalog_source_schema",
+    "load_connector_grant_source",
+    "load_connector_grant_source_schema",
+    "validate_connector_grant_source",
+    "validate_asset_catalog_source",
     "validate_event",
 ]
 

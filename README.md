@@ -230,6 +230,401 @@ acquisition requires a new case in H0.
 See [ADR 0017](docs/adr/0017-bounded-public-repository-acquisition.md) and
 [Security](SECURITY.md) before adding any other connector or target class.
 
+## Local personal asset catalog onboarding
+
+READIN can now start with your own asset surface before any live connector is granted. Create a
+private local manifest outside Git and cloud-synchronized folders, then import it into a private
+ledger:
+
+```shell
+READIN_ASSET_DIR="$HOME/.local/share/readin/personal-catalog"
+mkdir -p "$READIN_ASSET_DIR"
+chmod 700 "$READIN_ASSET_DIR"
+
+$EDITOR "$READIN_ASSET_DIR/source.json"
+chmod 600 "$READIN_ASSET_DIR/source.json"
+
+uv run readin import-asset-catalog \
+  --ledger "$READIN_ASSET_DIR/events.jsonl" \
+  --manifest "$READIN_ASSET_DIR/source.json" \
+  --attest
+
+uv run readin workbench \
+  --ledger "$READIN_ASSET_DIR/events.jsonl" \
+  --host 127.0.0.1 \
+  --port 4173 \
+  --open-browser
+```
+
+Minimal manifest shape:
+
+Replace `catalog_id` with a fresh lowercase UUID, for example:
+
+```shell
+uuidgen | tr 'A-F' 'a-f'
+```
+
+```json
+{
+  "schema_version": "readin.asset-catalog-source.v0.1",
+  "catalog_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "catalog_name": "Personal asset surface",
+  "declared_at": "2026-09-04T12:00:00Z",
+  "owner": {
+    "label": "Local operator",
+    "attestation": "USER_ATTESTED_NOT_VERIFIED",
+    "scope": "SELF_OR_CONTROLLED_ASSETS_ONLY"
+  },
+  "purpose": {
+    "kind": "PERSONAL_ASSET_CATALOG",
+    "statement": "Build a local inventory of accounts and assets before any live connector.",
+    "secondary_use": "PROHIBITED"
+  },
+  "authority": {
+    "state": "NO_AUTHORITY",
+    "collection": "NOT_GRANTED",
+    "external_actions": "PROHIBITED",
+    "credential_storage": "PROHIBITED",
+    "network_access": false,
+    "people_targeting": "PROHIBITED"
+  },
+  "source": {
+    "kind": "USER_DECLARED_LOCAL_MANIFEST",
+    "network_access": false,
+    "credential_material": "ABSENT",
+    "path_retention": "NOT_RECORDED_IN_LEDGER"
+  },
+  "assets": [
+    {
+      "asset_class": "SOCIAL_ACCOUNT",
+      "display_name": "My LinkedIn account",
+      "platform": "LinkedIn",
+      "account_identifier": "my-handle",
+      "source_uri": "https://www.linkedin.com/in/my-handle/",
+      "authorization_basis": "USER_OWNED_ACCOUNT_ATTESTED",
+      "collection_mode": "API_CONNECTION_REQUIRES_SEPARATE_GRANT",
+      "connector_intent": {
+        "connector_kind": "OAUTH_API",
+        "connection_state": "OAUTH_REQUIRED_NOT_REQUESTED",
+        "credential_state": "NONE",
+        "oauth_state": "NOT_REQUESTED",
+        "live_collection_state": "DISABLED",
+        "external_action_state": "PROHIBITED",
+        "terms_review_state": "REQUIRES_REVIEW"
+      }
+    },
+    {
+      "asset_class": "WEB_PROPERTY",
+      "display_name": "My public website",
+      "platform": "HTTPS",
+      "account_identifier": "example.com",
+      "source_uri": "https://example.com/",
+      "authorization_basis": "USER_ADMINISTERED_ASSET_ATTESTED",
+      "collection_mode": "LOCAL_EXPORT_IMPORT_ONLY",
+      "connector_intent": {
+        "connector_kind": "PUBLIC_WEB",
+        "connection_state": "EXPORT_IMPORT_READY",
+        "credential_state": "NONE",
+        "oauth_state": "NOT_REQUIRED",
+        "live_collection_state": "DISABLED",
+        "external_action_state": "PROHIBITED",
+        "terms_review_state": "USER_ATTESTED_ALLOWED"
+      }
+    }
+  ]
+}
+```
+
+This command hashes the manifest as local evidence, creates tracked asset records, and admits one
+immutable `asset_catalog.user_declared_profile` observation per asset. It does not contact the
+listed services. OAuth, social APIs, private messages, follower graphs, contacts, monitoring,
+person-target dossiers, and external actions remain unavailable until a later connector contract
+explicitly grants and tests them.
+
+See [ADR 0018](docs/adr/0018-local-asset-catalog-onboarding.md) for the full onboarding boundary.
+
+### Record connector grant readiness
+
+After an asset is in the catalog, record a separate connector grant manifest before building any
+source-specific runner:
+
+```shell
+uv run readin record-connector-grant \
+  --ledger "$READIN_LEDGER" \
+  --manifest "$READIN_PRIVATE_DIR/linkedin-grant.json" \
+  --attest
+```
+
+The grant manifest references the `entity_id` and `asset_key` returned by
+`import-asset-catalog`. It records:
+
+- connector kind and version;
+- scope names, source surfaces, and minimization state;
+- allowed observation types that a later parser may emit;
+- retention, revocation, audit, and redaction requirements; and
+- hard gates for credentials, OAuth, network access, live collection, external action, and people
+  targeting.
+
+Example grant manifest for a future read-only profile connector:
+
+```json
+{
+  "schema_version": "readin.connector-grant-source.v0.1",
+  "grant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "declared_at": "2026-09-04T12:05:00Z",
+  "owner": {
+    "label": "Local operator",
+    "attestation": "USER_ATTESTED_NOT_VERIFIED",
+    "scope": "SELF_OR_CONTROLLED_ASSETS_ONLY"
+  },
+  "asset": {
+    "entity_id": "<asset-entity-id-from-import>",
+    "catalog_id": "<catalog-id-from-import>",
+    "asset_key": "<asset-key-from-import>",
+    "asset_class": "SOCIAL_ACCOUNT",
+    "platform": "LinkedIn",
+    "account_identifier": "operator"
+  },
+  "provider": {
+    "platform": "LinkedIn",
+    "connector_kind": "OAUTH_API",
+    "connector_name": "LinkedIn read-only profile setup",
+    "connector_version": "0.0.0-contract-only",
+    "terms_review_state": "REQUIRES_REVIEW",
+    "terms_reference_uri": "https://www.linkedin.com/legal/user-agreement"
+  },
+  "purpose": {
+    "kind": "CONNECTOR_READINESS_ASSESSMENT",
+    "statement": "Record a future read-only connector boundary for the operator account.",
+    "secondary_use": "PROHIBITED"
+  },
+  "grant": {
+    "grant_kind": "OAUTH_API_REQUIRES_SEPARATE_TOKEN_FLOW",
+    "grant_state": "RECORDED_NOT_ACTIVE",
+    "authorization_basis": "USER_OWNED_ACCOUNT_ATTESTED",
+    "access_mode": "API_CONNECTION_REQUIRES_SEPARATE_TOKEN_FLOW",
+    "collection_state": "NOT_STARTED",
+    "credential_material": "ABSENT",
+    "credential_storage": "PROHIBITED",
+    "oauth_state": "NOT_REQUESTED",
+    "live_collection_state": "DISABLED",
+    "network_access": false,
+    "external_action_state": "PROHIBITED",
+    "people_targeting": "PROHIBITED",
+    "activation_requirement": "SEPARATE_EXPLICIT_CONNECTOR_GRANT_REQUIRED"
+  },
+  "authority": {
+    "state": "NO_AUTHORITY",
+    "collection": "NOT_STARTED",
+    "external_actions": "PROHIBITED",
+    "credential_storage": "PROHIBITED",
+    "network_access": false,
+    "people_targeting": "PROHIBITED"
+  },
+  "source": {
+    "kind": "USER_DECLARED_LOCAL_GRANT_MANIFEST",
+    "network_access": false,
+    "credential_material": "ABSENT",
+    "path_retention": "NOT_RECORDED_IN_LEDGER"
+  },
+  "scopes": [
+    {
+      "scope_name": "profile_metadata",
+      "source_surface": "Self profile metadata",
+      "data_category": "ACCOUNT_PROFILE_METADATA",
+      "access_intent": "READ_ONLY_IF_SEPARATELY_ENABLED",
+      "minimization": "MINIMUM_NECESSARY",
+      "private_counterparty_data": "EXCLUDED",
+      "claim_extraction": "PROHIBITED"
+    }
+  ],
+  "allowed_observation_types": [
+    {
+      "observation_type": "social.profile_metadata",
+      "admission_state": "CONTRACTED_NOT_ENABLED",
+      "claim_extraction": "PROHIBITED",
+      "external_action_state": "PROHIBITED"
+    }
+  ],
+  "retention": {
+    "local_retention_days": 30,
+    "raw_export_retention": "NOT_APPLICABLE",
+    "path_retention": "NOT_RECORDED_IN_LEDGER"
+  },
+  "revocation": {
+    "state": "MANUAL_REVOCATION_REQUIRED_IF_ACTIVATED",
+    "operator_action": "If later activated, revoke access at the provider and remove local token material."
+  },
+  "audit": {
+    "receipt_required": true,
+    "path_retention": "NOT_RECORDED_IN_LEDGER",
+    "token_storage": "PROHIBITED",
+    "execution_log": "REQUIRED_BEFORE_COLLECTION",
+    "redaction_policy": "REQUIRED_BEFORE_COUNTERPARTY_DATA"
+  }
+}
+```
+
+`record-connector-grant` appends a local grant frame, evidence manifest, and immutable
+`asset_connector.grant_declared` observation. It does not request OAuth, store tokens, contact the
+provider, parse exports, or collect account data. It exists to make the next implementation step
+typed and reviewable before any sensor runner is written.
+
+See [ADR 0019](docs/adr/0019-connector-grant-readiness.md) for the connector-grant boundary.
+
+## Import a local profile export (H3)
+
+The first working import path accepts a **prepared JSON profile batch** for one cataloged social
+account. Native provider ZIP and CSV archives are not yet supported. Copy only your platform,
+account identifier, display name, and optional catalog-matched profile URL into this format.
+Provider origin and accuracy remain user-supplied, not independently verified.
+
+First record a **new** grant using the H2 manifest above with these changes:
+
+- Use a new `grant_id` (never reuse an ID with changed content).
+- Set `provider.connector_kind` to `SOCIAL_EXPORT` and give it a local-export connector name.
+- Set `grant.grant_kind` to `LOCAL_EXPORT_ONLY`, `grant.access_mode` to
+  `LOCAL_EXPORT_IMPORT_ONLY`, and `grant.oauth_state` to `NOT_REQUIRED`.
+- Keep `ACCOUNT_PROFILE_METADATA` scope and `social.profile_metadata` as the output.
+- Set `retention.raw_export_retention` to `USER_MANAGED_NOT_RECORDED`.
+
+Store this prepared export as an owner-only file outside Git and cloud-synchronized folders.
+Replace the example IDs with your export ID, recorded local-export grant ID, and catalog entity
+ID. Platform, account identifier, and optional URL must match that catalog asset exactly.
+
+```json
+{
+  "schema_version": "readin.local-source-export.v0.1",
+  "export_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  "grant_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "asset_entity_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "prepared_at": "2026-09-04T12:10:00Z",
+  "parser": "GENERIC_JSON_OBSERVATION_BATCH",
+  "handling": {
+    "owner_attestation": "SELF_OR_CONTROLLED_ASSETS_ONLY",
+    "private_counterparty_data": "EXCLUDED",
+    "credential_material": "ABSENT",
+    "network_access": false,
+    "raw_export_retention": "USER_MANAGED_NOT_RECORDED"
+  },
+  "observations": [
+    {
+      "record_key": "profile-1",
+      "observation_type": "social.profile_metadata",
+      "observed_at": "2026-09-04T12:00:00Z",
+      "structured_payload": {
+        "platform": "LinkedIn",
+        "account_identifier": "operator",
+        "display_name": "Example operator",
+        "profile_url": "https://www.linkedin.com/in/operator/"
+      }
+    }
+  ]
+}
+```
+
+Preview, then import using the same paths and grant:
+
+```shell
+uv run readin import-local-source-export \
+  --ledger "/path/outside/git/events.jsonl" \
+  --grant "your-local-export-grant-id" \
+  --source "/path/outside/git/profile-export.json" \
+  --preview
+
+uv run readin import-local-source-export \
+  --ledger "/path/outside/git/events.jsonl" \
+  --grant "your-local-export-grant-id" \
+  --source "/path/outside/git/profile-export.json" \
+  --attest
+
+uv run readin workbench \
+  --ledger "/path/outside/git/events.jsonl" --open-browser
+```
+
+Preview performs all import checks without writing. Admission returns a receipt with source
+SHA-256, record count, and observation IDs. Identical retries return `ALREADY_IMPORTED` without
+duplicating observations. Refresh the workbench: **Setup → Imported source records** shows the
+receipt; **Evidence → Imported source records** shows the values and evidence identities.
+
+The source stays under your control; READIN does not copy or delete it. Declared retention days
+are not an automated expiration mechanism, and admitted observations remain in the ledger.
+See [ADR 0020](docs/adr/0020-local-source-export-observation-import.md) for the exact contract.
+
+## Native files and source coverage (H4)
+
+READIN now accepts these native file layouts without a prepared READIN observation JSON:
+
+| Parser | Input | Selected output |
+| --- | --- | --- |
+| `LINKEDIN_PROFILE_CSV` | UTF-8 Profile.csv with First Name / Last Name headers and one row | Display name |
+| `LINKEDIN_PROFILE_ZIP` | ZIP containing exactly one Profile.csv | Same profile fields; other members are skipped |
+| `GITHUB_REPOSITORY_JSON` | Saved public repository REST response | Repository identity, visibility, flags, branch, language, star/fork/issue counts when present |
+
+These formats are covered by synthetic fixture tests. An actual provider export must match the
+documented layout; other locales, shapes, and future changes may need a parser update.
+
+The **Sources** tab shows all 11 asset classes, available formats for the selected account,
+compatible grants, and how many assets actually have imported records. This is also available as:
+
+```shell
+uv run readin list-source-capabilities --ledger "/absolute/path/to/events.jsonl"
+```
+
+For a cataloged LinkedIn account, prepare a local-export grant without writing the manifest by
+hand. Replace the ledger and asset ID, and choose a new private output filename outside Git:
+
+```shell
+umask 077
+uv run readin prepare-native-source-grant \
+  --ledger "/absolute/path/to/events.jsonl" \
+  --asset "your-catalog-asset-id" \
+  --parser LINKEDIN_PROFILE_ZIP > "/private/local/path/linkedin-grant.json"
+
+uv run readin record-connector-grant \
+  --ledger "/absolute/path/to/events.jsonl" \
+  --manifest "/private/local/path/linkedin-grant.json" --attest
+```
+
+Review the generated manifest before recording it. Generation itself changes no ledger state and
+does not attest provider terms. Use the `grant_id` returned by the recording command below. The
+CSV and ZIP parsers share a profile metadata scope, so one compatible local-export grant can cover
+either form. An existing OAuth-readiness grant cannot substitute for a local-export grant.
+
+Download your own export using [LinkedIn's data download flow](https://www.linkedin.com/help/linkedin/answer/a1339364/downloading-your-account-data).
+Move the chosen file to a private local folder outside Git and cloud sync, and make it owner-only
+with `chmod 600 "/private/local/path/linkedin-export.zip"`. Preview it:
+
+```shell
+uv run readin import-native-source-export \
+  --ledger "/absolute/path/to/events.jsonl" \
+  --asset "your-catalog-asset-id" \
+  --grant "your-recorded-local-export-grant-id" \
+  --parser LINKEDIN_PROFILE_ZIP \
+  --source "/private/local/path/linkedin-export.zip" \
+  --observed-at "2026-09-04T09:00:00-05:00" \
+  --preview
+```
+
+Set `--observed-at` to the observation/export time you are attesting. Preview returns the exact
+selected record, original file hash, member hash for ZIP, selected fields, exclusion counts, and
+identity-binding status. After reviewing, replace `--preview` with `--attest` to admit it. Refresh
+the workbench's Sources, Setup, and Evidence tabs. Identical retries with the same observation time
+do not duplicate records. The original file is neither copied nor deleted.
+
+For GitHub, use `GITHUB_REPOSITORY_JSON` with a `SOFTWARE_REPOSITORY` catalog asset, platform GitHub,
+`account_identifier` set to `owner/repository`, and the matching repository HTML URL. The generated
+grant selects `OWNED_REPOSITORY_METADATA` and `github.public_repository_metadata.imported`.
+The file must be a saved public [Get a repository response](https://docs.github.com/en/rest/repos/repos#get-a-repository);
+this command does not call GitHub, authenticate the file's origin, or import private repositories.
+
+**Operational coverage:** H4 supports the listed social-profile and repository formats. Email,
+calendar, financial accounts, documents, devices, and other classes are catalogable but do not yet
+have native importers. Account login, synchronization, and monitoring are not implemented. The
+existing H0 exact-target public repository request remains a separate case-policy workflow.
+See [ADR 0021](docs/adr/0021-native-export-parsers-and-source-coverage.md) for field boundaries,
+archive limits, provenance, and the path toward broader source coverage.
+
 ## Quick start
 
 Install [uv](https://docs.astral.sh/uv/), then:

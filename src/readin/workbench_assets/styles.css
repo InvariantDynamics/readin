@@ -464,6 +464,15 @@ p {
   text-transform: uppercase;
 }
 
+.asset-item-connection {
+  display: block;
+  margin-top: 8px;
+}
+
+.asset-item-connection .state-tag {
+  max-width: 100%;
+}
+
 .catalog-footer {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1056,6 +1065,16 @@ p {
   font-size: 11px;
   line-height: 1.6;
 }
+
+.source-table-wrap { overflow-x: auto; }
+.source-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.source-copy { padding: 0 14px; margin: 14px 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.source-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+.source-table th, .source-table td { padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.source-table td:last-child { min-width: 210px; }
+.source-command { margin-top: 14px; }
+.source-command summary { cursor: pointer; padding: 10px 0; }
+.source-command pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.6; }
 
 .collection-boundary {
   padding: 14px;

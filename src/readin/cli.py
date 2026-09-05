@@ -9,7 +9,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from readin.asset_catalog import AssetCatalogError, import_asset_catalog_source
 from readin.belief import BeliefRuntimeError, execute_belief_revision
+from readin.connector_grants import ConnectorGrantError, import_connector_grant_source
 from readin.contracts import ContractViolation
 from readin.discrimination import (
     DiscriminationRuntimeError,
@@ -54,6 +56,12 @@ from readin.forecasting import (
     create_forecast_evaluation_design,
     execute_frozen_forecast_baseline,
 )
+from readin.local_source_exports import import_local_source_export
+from readin.native_source_exports import (
+    PARSERS,
+    import_native_source_export,
+    prepare_native_source_grant,
+)
 from readin.projection import ProjectionError
 from readin.readback_selection import (
     ReadbackSelectionError,
@@ -74,6 +82,7 @@ from readin.scenarios import (
     create_bounded_scenario,
     execute_scenario,
 )
+from readin.source_capabilities import build_source_capabilities
 from readin.store import EventLedger, LedgerError
 from readin.workbench import (
     WorkbenchError,
@@ -180,6 +189,87 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Make the case-authorized one-shot credential-free GitHub metadata request",
     )
     collect_real_case_parser.add_argument("--case-dir", required=True)
+
+    asset_catalog_parser = subparsers.add_parser(
+        "import-asset-catalog",
+        help="Import a private local manifest of self/controlled assets without live collection",
+    )
+    _add_ledger_argument(asset_catalog_parser)
+    asset_catalog_parser.add_argument("--manifest", required=True)
+    asset_catalog_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help=(
+            "Attest the manifest is limited to self/controlled assets and grants no live collection"
+        ),
+    )
+    asset_catalog_parser.add_argument("--occurred-at")
+
+    connector_grant_parser = subparsers.add_parser(
+        "record-connector-grant",
+        help="Record a private local connector grant manifest without enabling live collection",
+    )
+    _add_ledger_argument(connector_grant_parser)
+    connector_grant_parser.add_argument("--manifest", required=True)
+    connector_grant_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help=(
+            "Attest the grant is limited to self/controlled assets and authorizes no "
+            "live collection"
+        ),
+    )
+    connector_grant_parser.add_argument("--occurred-at")
+
+    export_parser = subparsers.add_parser(
+        "import-local-source-export", help="Preview or import a prepared local profile export"
+    )
+    _add_ledger_argument(export_parser)
+    export_parser.add_argument("--source", required=True)
+    export_parser.add_argument("--grant", required=True)
+    export_parser.add_argument(
+        "--preview", action="store_true", help="Validate and report without writing"
+    )
+    export_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help="Attest self/controlled profile data with credentials and counterparty data excluded",
+    )
+    export_parser.add_argument("--occurred-at")
+
+    native_parser = subparsers.add_parser(
+        "import-native-source-export",
+        help="Preview or import a native LinkedIn profile or saved GitHub repository export",
+    )
+    _add_ledger_argument(native_parser)
+    native_parser.add_argument("--source", required=True)
+    native_parser.add_argument("--parser", required=True, choices=sorted(PARSERS))
+    native_parser.add_argument("--asset", required=True)
+    native_parser.add_argument("--grant", required=True)
+    native_parser.add_argument(
+        "--observed-at",
+        required=True,
+        help="Operator-declared export observation time with UTC offset",
+    )
+    native_parser.add_argument("--preview", action="store_true")
+    native_parser.add_argument(
+        "--attest",
+        action="store_true",
+        help="Attest source belongs to the selected self/controlled asset",
+    )
+    native_parser.add_argument("--occurred-at")
+    capabilities_parser = subparsers.add_parser(
+        "list-source-capabilities",
+        help="Show parser support, grant readiness, and actual imported source coverage",
+    )
+    _add_ledger_argument(capabilities_parser)
+    template_parser = subparsers.add_parser(
+        "prepare-native-source-grant",
+        help="Print a reviewable local export grant manifest for an existing catalog asset",
+    )
+    _add_ledger_argument(template_parser)
+    template_parser.add_argument("--asset", required=True)
+    template_parser.add_argument("--parser", required=True, choices=sorted(PARSERS))
 
     entity_parser = subparsers.add_parser(
         "create-entity", help="Create and optionally track an entity"
@@ -860,6 +950,46 @@ def _run(args: argparse.Namespace) -> Any:
         }
 
     ledger = _ledger(args)
+    if args.command == "list-source-capabilities":
+        return build_source_capabilities(ledger.projection())
+    if args.command == "prepare-native-source-grant":
+        return prepare_native_source_grant(ledger.projection(), args.asset, args.parser)
+    if args.command == "import-native-source-export":
+        return import_native_source_export(
+            ledger,
+            args.source,
+            parser=args.parser,
+            asset_id=args.asset,
+            grant_id=args.grant,
+            observed_at=args.observed_at,
+            preview=args.preview,
+            attested=args.attest,
+            occurred_at=args.occurred_at,
+        )
+    if args.command == "import-local-source-export":
+        return import_local_source_export(
+            ledger,
+            args.source,
+            grant_id=args.grant,
+            attested=args.attest,
+            preview=args.preview,
+            occurred_at=args.occurred_at,
+        )
+    if args.command == "import-asset-catalog":
+        return import_asset_catalog_source(
+            ledger,
+            args.manifest,
+            attested=args.attest,
+            occurred_at=args.occurred_at,
+        )
+    if args.command == "record-connector-grant":
+        return import_connector_grant_source(
+            ledger,
+            args.manifest,
+            attested=args.attest,
+            occurred_at=args.occurred_at,
+        )
+
     if args.command == "init":
         ledger.initialize()
         return {
@@ -1355,6 +1485,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         _emit(_run(args))
         return 0
     except (
+        AssetCatalogError,
+        ConnectorGrantError,
         ContractViolation,
         DiscriminationRuntimeError,
         BeliefRuntimeError,

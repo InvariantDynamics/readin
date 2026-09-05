@@ -47,6 +47,7 @@ function stateClass(value) {
     text.includes("MATCHED") ||
     text.includes("VERIFIED") ||
     text.includes("ADMITTED") ||
+    text.includes("READY") ||
     text === "FIT"
   ) {
     return "is-good";
@@ -83,7 +84,7 @@ function emptyState() {
 function renderCatalog() {
   const catalog = state.snapshot?.catalog ?? [];
   const filtered = catalog.filter((item) => {
-    const haystack = `${item.canonical_name} ${item.entity_type} ${item.id}`.toLowerCase();
+    const haystack = `${item.canonical_name} ${item.entity_type} ${item.asset_class ?? ""} ${item.platform ?? ""} ${item.connection_state ?? ""} ${item.id}`.toLowerCase();
     return haystack.includes(state.search.toLowerCase());
   });
   byId("asset-count").textContent = String(catalog.length);
@@ -94,8 +95,11 @@ function renderCatalog() {
             type="button" data-asset-id="${escapeHtml(item.id)}">
             <span class="asset-item-name">${escapeHtml(item.canonical_name)}</span>
             <span class="asset-item-meta">
-              <span>${escapeHtml(item.entity_type)}</span>
-              <span>${item.counts.observations} obs · ${item.counts.claims} claims</span>
+              <span>${escapeHtml(item.asset_class ?? item.entity_type)}</span>
+              <span>${escapeHtml(item.platform ?? "local")} · ${item.counts.observations} obs</span>
+            </span>
+            <span class="asset-item-connection">
+              ${stateTag(item.connection_state ?? "UNBOUND")}
             </span>
           </button>`,
         )
@@ -380,6 +384,221 @@ function renderAudit() {
   </div>`;
 }
 
+function renderSetup(asset) {
+  const setup = asset.governance.source_setup;
+  const catalog = state.snapshot.asset_catalog;
+  const grant = asset.governance.connector_grant;
+  const sourceExports = asset.governance.source_exports ?? [];
+  const importedCount = sourceExports.reduce((sum, batch) => sum + batch.observation_count, 0);
+  if (!setup) {
+    return `<div class="case-view">
+      <section class="case-hero is-unbound">
+        <div>
+          <span class="eyebrow">Source setup</span>
+          <h2>No asset-catalog binding</h2>
+          <p>This asset was not imported from a local personal-asset manifest. It can still be inspected as a tracked asset, but no connector intent is recorded.</p>
+        </div>
+        ${stateTag(asset.governance.state)}
+      </section>
+    </div>`;
+  }
+
+  const nextAction = sourceExports.length
+    ? "Imported records are ready to inspect in Evidence. Sources shows available parsers and import readiness."
+    : grant?.access_mode === "LOCAL_EXPORT_IMPORT_ONLY"
+      ? "Prepare a profile metadata batch, preview it with import-local-source-export --preview, then import it with --attest."
+      : setup.collection_mode === "LOCAL_EXPORT_IMPORT_ONLY"
+      ? "Next mechanism: add a source-specific local export parser and admit selected records as observations."
+      : setup.collection_mode === "API_CONNECTION_REQUIRES_SEPARATE_GRANT"
+        ? grant
+          ? "Next mechanism: implement a source-specific connector runner behind this recorded grant; live collection is still disabled."
+          : "Next mechanism: create a separate connector grant contract before any OAuth or API read can occur."
+        : "Next mechanism: enter or attach source observations manually through the local ledger.";
+  const classes = catalog.asset_class_counts ?? {};
+  const connections = catalog.connection_state_counts ?? {};
+  const classRows = Object.entries(classes)
+    .map(
+      ([label, value]) => `<li class="record-row">
+        <div class="record-primary">${escapeHtml(titleCase(label))}</div>
+        <div class="record-secondary">Declared asset class</div>
+        ${stateTag(value)}
+      </li>`,
+    )
+    .join("");
+  const connectionRows = Object.entries(connections)
+    .map(
+      ([label, value]) => `<li class="record-row">
+        <div class="record-primary">${escapeHtml(label)}</div>
+        <div class="record-secondary">Connector state count</div>
+        ${stateTag(value)}
+      </li>`,
+    )
+    .join("");
+
+  const setupBody = `<div class="collection-boundary">
+    <div><span>${escapeHtml(setup.platform)}</span><strong>${escapeHtml(setup.account_identifier)}</strong></div>
+    <div class="collection-boundary-states">
+      ${stateTag(setup.connection_state)}
+      ${stateTag(setup.credential_state)}
+      ${stateTag(setup.live_collection_state)}
+    </div>
+    <p>${escapeHtml(nextAction)}</p>
+  </div>
+  ${factList([
+    ["Asset class", setup.asset_class],
+    ["Connector kind", setup.connector_kind],
+    ["Collection mode", setup.collection_mode],
+    ["Authorization basis", setup.authorization_basis],
+    ["Owner attestation", setup.owner_attestation],
+    ["Terms review", setup.terms_review_state],
+    ["OAuth", setup.oauth_state],
+    ["Network access", String(setup.network_access)],
+    ["External action", setup.external_action_state],
+    ["People targeting", setup.people_targeting],
+    ["Connector grant", setup.connector_grant_state],
+    ["Grant access mode", setup.connector_grant_access_mode ?? "not recorded"],
+    ["Source URI", setup.source_uri ?? "not declared"],
+    ["Source digest", `sha256:${setup.source_digest_sha256}`],
+  ])}`;
+
+  const scopeRows = grant
+    ? grant.scopes
+        .map(
+          (scope) => `<li class="record-row">
+            <div class="record-primary">${escapeHtml(scope.scope_name)}<small>${escapeHtml(scope.source_surface)}</small></div>
+            <div class="record-secondary">${escapeHtml(scope.data_category)}<small>${escapeHtml(scope.access_intent)}</small></div>
+            ${stateTag(scope.private_counterparty_data)}
+          </li>`,
+        )
+        .join("")
+    : "";
+  const outputRows = grant
+    ? grant.allowed_observation_types
+        .map(
+          (output) => `<li class="record-row">
+            <div class="record-primary">${escapeHtml(output.observation_type)}</div>
+            <div class="record-secondary">Claim extraction ${escapeHtml(output.claim_extraction)}</div>
+            ${stateTag(output.admission_state)}
+          </li>`,
+        )
+        .join("")
+    : "";
+  const grantBody = grant
+    ? `<div class="collection-boundary">
+        <div><span>${escapeHtml(grant.connector_name)}</span><strong>${escapeHtml(grant.grant_kind)}</strong></div>
+        <div class="collection-boundary-states">
+          ${stateTag(grant.grant_state)}
+          ${stateTag(grant.collection_state)}
+          ${stateTag(grant.live_collection_state)}
+        </div>
+        <p>Grant manifest recorded as evidence-backed observation ${escapeHtml(grant.observation_id)}. It stores no credentials and authorizes no runtime collection.</p>
+      </div>
+      ${factList([
+        ["Access mode", grant.access_mode],
+        ["OAuth", grant.oauth_state],
+        ["Credential material", grant.credential_material],
+        ["Credential storage", grant.credential_storage],
+        ["Terms review", grant.terms_review_state],
+        ["Network access", String(grant.network_access)],
+        ["External action", grant.external_action_state],
+        ["People targeting", grant.people_targeting],
+        ["Activation requirement", grant.activation_requirement],
+        ["Revocation", grant.revocation.state],
+        ["Grant digest", `sha256:${grant.source_digest_sha256}`],
+      ])}
+      <h3>Declared scopes</h3>
+      <ul class="record-list">${scopeRows}</ul>
+      <h3>Permitted observation outputs</h3>
+      <ul class="record-list">${outputRows}</ul>`
+    : `<div class="collection-boundary">
+        <div><span>No connector grant manifest recorded</span><strong>NOT_RECORDED</strong></div>
+        <div class="collection-boundary-states">
+          ${stateTag("NOT_RECORDED")}
+          ${stateTag("NOT_STARTED")}
+          ${stateTag("LIVE_COLLECTION_DISABLED")}
+        </div>
+        <p>The asset is tracked, but no source-specific scope, minimization, retention, revocation, or output contract has been admitted yet.</p>
+      </div>`;
+
+  const pipeline = `<ol class="audit-sequence">
+    <li><span class="audit-index">01</span><div><strong>Declare asset</strong><small>Private local manifest, owner-attested, schema validated</small></div>${stateTag("DONE")}</li>
+    <li><span class="audit-index">02</span><div><strong>Manifest source</strong><small>SHA-256 evidence identity; source path not recorded in ledger</small></div>${stateTag("ADMITTED")}</li>
+    <li><span class="audit-index">03</span><div><strong>Track asset</strong><small>Entity and tracking records replay into the catalog</small></div>${stateTag("TRACKED")}</li>
+    <li><span class="audit-index">04</span><div><strong>Record connector intent</strong><small>Capabilities are represented as states, not credentials or sessions</small></div>${stateTag(setup.connection_state)}</li>
+    <li><span class="audit-index">05</span><div><strong>Record connector grant</strong><small>Scope, minimization, retention, revocation, and output observations are contracted separately</small></div>${stateTag(setup.connector_grant_state)}</li>
+    <li><span class="audit-index">06</span><div><strong>Import local profile records</strong><small>Preview a prepared export, validate its grant, and admit source observations</small></div>${stateTag(importedCount ? `${importedCount} RECORDS` : "AWAITING_EXPORT")}</li>
+  </ol>`;
+
+  const importsBody = sourceExports.length
+    ? sourceExports.map((batch) => `<div class="collection-boundary">
+        <div><span>${escapeHtml(batch.parser ?? "Local export")}</span><strong>${escapeHtml(batch.observation_count)} imported records</strong></div>
+        ${stateTag(batch.state)}
+        ${factList([
+          ["Imported", batch.imported_at],
+          ["Export ID", batch.export_id],
+          ["Grant ID", batch.grant_id],
+          ["Source SHA-256", batch.source_sha256],
+          ["Source bytes", String(batch.source_size)],
+          ["Record types", batch.observation_types.join(", ")],
+          ["Identity binding", batch.identity_binding ?? "User-declared profile"],
+          ["Selected source fields", batch.selected_source_fields?.join(", ") || "Prepared record fields"],
+          ["Excluded fields", batch.excluded_field_count ?? "Not applicable"],
+          ["Skipped archive entries", batch.archive_entries_skipped ?? "Not applicable"],
+        ])}
+      </div>`).join("")
+    : `<p>No profile records imported yet. The local importer accepts prepared JSON containing your platform, account identifier, display name, and optional catalog-matched profile URL.</p>
+       <p>Use a local-export grant with profile metadata scope and user-managed source retention. Native provider ZIP and CSV archives need a source-specific parser.</p>`;
+
+  return `<div class="overview-grid">
+    ${sectionCard("Asset source setup", setup.connection_state, setupBody, true)}
+    ${sectionCard("Imported source records", `${importedCount} records`, importsBody, true)}
+    ${sectionCard("Connector grant readiness", grant ? grant.grant_state : "NOT_RECORDED", grantBody, true)}
+    ${sectionCard("Operational ingestion path", "manifest → catalog → observations", pipeline, true)}
+    ${sectionCard("Catalog asset classes", `${catalog.asset_count} declared`, `<ul class="record-list">${classRows}</ul>`)}
+    ${sectionCard("Connector states", catalog.live_collection_state, `<ul class="record-list">${connectionRows}</ul>`)}
+  </div>`;
+}
+
+function renderSources(asset) {
+  const coverage = state.snapshot.source_capabilities;
+  if (!coverage) return emptyState();
+  const selected = coverage.assets.find((item) => item.asset_entity_id === asset?.identity.id);
+  const supported = coverage.asset_classes.filter((item) => item.supported_formats.length).length;
+  const overview = `<div class="aperture-grid source-metrics">
+    <div class="aperture-cell"><strong>${coverage.catalog_asset_count}</strong><span>Cataloged assets</span></div>
+    <div class="aperture-cell"><strong>${coverage.imported_asset_count}</strong><span>Assets with local imports</span></div>
+    <div class="aperture-cell"><strong>${coverage.local_imported_record_count}</strong><span>Imported records</span></div>
+  </div><p class="source-copy">${supported} of ${coverage.asset_classes.length} asset classes have parsers for the formats listed below. Account synchronization and monitoring are not implemented.</p>`;
+  const parserRows = selected?.parsers.length
+    ? selected.parsers.map((item) => `<li class="record-row">
+        <div class="record-primary">${escapeHtml(item.label)}<small>${escapeHtml(item.observation_type)}</small></div>
+        <div class="record-secondary">${item.compatible_grant_ids.length ? `Grant: ${escapeHtml(item.compatible_grant_ids.join(", "))}` : `Required scope: ${escapeHtml(item.data_category)}`}</div>
+        ${stateTag(item.state)}
+      </li>`).join("")
+    : `<li class="record-row"><div class="record-primary">${selected ? "No parser available for this asset's class and platform" : "Select or catalog an asset to see compatible import paths"}</div>${stateTag(selected ? "PARSER_NOT_IMPLEMENTED" : "NOT_CATALOGED")}</li>`;
+  const grantHelp = selected?.parsers.some((item) => !item.compatible_grant_ids.length)
+    ? `<p>Prepare a matching grant with <code>uv run readin prepare-native-source-grant --ledger "$READIN_LEDGER" --asset ${escapeHtml(selected.asset_entity_id)} --parser PARSER_NAME</code>. Review and save the output as a private file, then record it with <code>record-connector-grant --attest</code>.</p>` : "";
+  const commands = selected?.parsers.filter((item) => item.input === "NATIVE_LOCAL_FILE" && item.compatible_grant_ids.length)
+    .map((item) => {
+      const quote = (value) => `'${String(value).replaceAll("'", "'\\''")}'`;
+      const command = `uv run readin import-native-source-export \\\n  --ledger "$READIN_LEDGER" \\\n  --asset ${quote(selected.asset_entity_id)} \\\n  --grant ${quote(item.compatible_grant_ids[0])} \\\n  --parser ${quote(item.parser)} \\\n  --source '/absolute/path/to/export' \\\n  --observed-at 'YYYY-MM-DDTHH:MM:SS-05:00' \\\n  --preview`;
+      return `<details class="source-command"><summary>Preview ${escapeHtml(item.label)}</summary>
+        <p>Set READIN_LEDGER to your ledger path, then replace the export path and its observation time. Run in Terminal. After reviewing the preview, replace --preview with --attest to import.</p>
+        <pre><code>${escapeHtml(command)}</code></pre></details>`;
+    }).join("") ?? "";
+  const classRows = coverage.asset_classes.map((item) => `<tr>
+    <th scope="row">${escapeHtml(titleCase(item.asset_class))}</th>
+    <td>${item.catalog_asset_count}</td><td>${item.imported_asset_count}</td>
+    <td>${item.supported_formats.length ? escapeHtml(item.supported_formats.join(" · ")) : "Parser not implemented"}</td>
+  </tr>`).join("");
+  return `<div class="overview-grid">
+    ${sectionCard("Source coverage", "local imports", overview, true)}
+    ${sectionCard("Selected asset: import paths", selected?.parser_state ?? "NOT_CATALOGED", `<ul class="record-list">${parserRows}</ul>${grantHelp}${commands}`, true)}
+    ${sectionCard("Signal classes", "catalog / imported assets", `<div class="source-table-wrap"><table class="source-table"><thead><tr><th>Asset class</th><th>Cataloged</th><th>Imported</th><th>Available formats</th></tr></thead><tbody>${classRows}</tbody></table></div>`, true)}
+    ${sectionCard("Public repository acquisition", "separate one-shot runner", `<p>The existing GitHub public-repository case runner makes one policy-bound metadata request. ${coverage.separate_public_repository_runner.recorded_observation_count} source observations from that runner are recorded in this ledger.</p><p>Saved-file imports establish selected-field coverage only; they do not establish complete account coverage.</p>`, true)}
+  </div>`;
+}
+
 function renderOverview(asset) {
   const frameRows = asset.observer_frames.length
     ? `<ul class="record-list">${asset.observer_frames
@@ -465,6 +684,24 @@ function renderClaims(asset) {
 }
 
 function renderEvidence(asset) {
+  const profileRecords = asset.evidence.observations.filter(
+    (item) => ["local-source-export-batch", "native-local-source-export"].includes(item.provenance.adapter),
+  );
+  const profileBody = profileRecords.map((item) => {
+    const payload = item.content.structured_payload;
+    return `<div class="collection-boundary">
+      <div><span>${escapeHtml(item.observation_type)}</span><strong>${escapeHtml(payload.record?.display_name ?? payload.record?.full_name ?? "Imported record")}</strong></div>
+      ${factList(Object.entries(payload.record ?? {}).map(([key, value]) => [titleCase(key), value]))}
+      ${factList([
+        ["Observed", item.observed_at],
+        ["Observation ID", item.id],
+        ["Evidence ID", item.source_artifact_id],
+        ["Export ID", payload.source_export?.export_id],
+        ["Identity binding", payload.source_export?.identity_binding ?? "User-declared profile"],
+      ])}
+      <p>User-supplied record. Provider origin and source completeness are unverified.</p>
+    </div>`;
+  }).join("");
   const observations = asset.evidence.observations.length
     ? `<ul class="record-list">${asset.evidence.observations
         .map(
@@ -499,6 +736,7 @@ function renderEvidence(asset) {
         .join("")}</ul>`
     : emptyState();
   return `<div class="overview-grid">
+    ${profileRecords.length ? sectionCard("Imported source records", `${profileRecords.length} records`, profileBody, true) : ""}
     ${sectionCard("Admitted observations", `${asset.evidence.observations.length} immutable`, observations, true)}
     ${sectionCard("Evidence manifests", `${asset.evidence.manifests.length} immutable`, manifests, true)}
     ${sectionCard("Dependency ancestry", `${asset.evidence.dependencies.length} edges`, dependencies, true)}
@@ -817,6 +1055,8 @@ function renderActiveView(asset) {
   const renderers = {
     case: renderCase,
     audit: renderAudit,
+    setup: renderSetup,
+    sources: renderSources,
     overview: renderOverview,
     claims: renderClaims,
     evidence: renderEvidence,
@@ -830,6 +1070,12 @@ function renderActiveView(asset) {
   byId("view-panel").innerHTML = renderers[state.activeTab](asset);
 }
 
+function syncActiveTabButtons() {
+  document.querySelectorAll("[data-tab]").forEach((item) => {
+    item.classList.toggle("is-active", item.dataset.tab === state.activeTab);
+  });
+}
+
 function renderSnapshot() {
   renderCatalog();
   renderLimits();
@@ -841,7 +1087,7 @@ function renderSnapshot() {
     byId("asset-aliases").textContent = "Add records with the local CLI, then refresh this view.";
     byId("state-version").textContent = "NO_STATE";
     byId("metric-strip").innerHTML = "";
-    byId("view-panel").innerHTML = emptyState();
+    byId("view-panel").innerHTML = state.snapshot.source_capabilities ? renderSources(null) : emptyState();
     return;
   }
   renderHeader(asset);
@@ -857,6 +1103,10 @@ async function loadSnapshot(assetId = null) {
     if (!response.ok) throw new Error(payload.error ?? `Request failed: ${response.status}`);
     state.snapshot = payload;
     state.selectedAssetId = payload.selected_asset?.identity.id ?? null;
+    if (!payload.case && payload.selected_asset?.governance?.source_setup && state.activeTab === "case") {
+      state.activeTab = "sources";
+      syncActiveTabButtons();
+    }
     renderSnapshot();
   } catch (error) {
     byId("view-panel").innerHTML = `<div class="error-state">
@@ -872,9 +1122,7 @@ if (document.documentElement.dataset.launchMode === "served") {
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.activeTab = button.dataset.tab;
-      document.querySelectorAll("[data-tab]").forEach((item) => {
-        item.classList.toggle("is-active", item === button);
-      });
+      syncActiveTabButtons();
       if (state.snapshot?.selected_asset) renderActiveView(state.snapshot.selected_asset);
     });
   });

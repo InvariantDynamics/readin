@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.readin.dev/v0.1/native-source-record.schema.json",
+  "title": "READIN normalized native export record v0.1",
+  "type": "object",
+  "required": ["schema_version", "parser", "record", "selected_source_fields", "excluded_field_count", "archive_entries_skipped", "selected_member_sha256", "identity_binding"],
+  "properties": {
+    "schema_version": {"const": "readin.native-source-record.v0.1"},
+    "parser": {"enum": ["LINKEDIN_PROFILE_CSV", "LINKEDIN_PROFILE_ZIP", "GITHUB_REPOSITORY_JSON"]},
+    "record": {"type": "object"},
+    "selected_source_fields": {"type": "array", "minItems": 1, "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "maxLength": 80}},
+    "excluded_field_count": {"type": "integer", "minimum": 0},
+    "archive_entries_skipped": {"type": "integer", "minimum": 0, "maximum": 2048},
+    "selected_member_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "identity_binding": {"enum": ["USER_ATTESTED_CATALOG_ASSOCIATION", "SOURCE_IDENTIFIER_MATCHED_NOT_AUTHENTICATED"]}
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {"if": {"properties": {"parser": {"enum": ["LINKEDIN_PROFILE_CSV", "LINKEDIN_PROFILE_ZIP"]}}}, "then": {"properties": {"record": {"$ref": "#/$defs/profile"}, "identity_binding": {"const": "USER_ATTESTED_CATALOG_ASSOCIATION"}}}},
+    {"if": {"properties": {"parser": {"const": "GITHUB_REPOSITORY_JSON"}}}, "then": {"properties": {"record": {"$ref": "#/$defs/repository"}, "identity_binding": {"const": "SOURCE_IDENTIFIER_MATCHED_NOT_AUTHENTICATED"}}}}
+  ],
+  "$defs": {
+    "profile": {
+      "type": "object", "required": ["display_name"],
+      "properties": {"display_name": {"type": "string", "minLength": 1, "maxLength": 160}},
+      "additionalProperties": false
+    },
+    "repository": {
+      "type": "object", "required": ["id", "name", "full_name", "private", "visibility"],
+      "properties": {
+        "id": {"type": "integer", "minimum": 1},
+        "name": {"type": "string", "minLength": 1, "maxLength": 100},
+        "full_name": {"type": "string", "minLength": 1, "maxLength": 202},
+        "private": {"const": false}, "visibility": {"const": "public"},
+        "archived": {"type": "boolean"}, "disabled": {"type": "boolean"},
+        "fork": {"type": "boolean"},
+        "default_branch": {"type": "string", "minLength": 1, "maxLength": 255},
+        "language": {"type": ["string", "null"], "maxLength": 100},
+        "stargazers_count": {"type": "integer", "minimum": 0},
+        "forks_count": {"type": "integer", "minimum": 0},
+        "open_issues_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    }
+  }
+}
