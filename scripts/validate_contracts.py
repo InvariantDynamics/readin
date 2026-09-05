@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import zipfile
 from copy import deepcopy
 from datetime import UTC, datetime
 
@@ -245,6 +247,28 @@ def main() -> None:
         pass
     else:
         raise AssertionError("native contract accepted an authenticated identity claim")
+    inventory_zip = io.BytesIO()
+    with zipfile.ZipFile(inventory_zip, "w") as archive:
+        archive.writestr("example.txt", "UNSELECTED_BODY")
+    for parser, asset_class in (
+        ("DOCUMENT_COLLECTION_ZIP", "DOCUMENT_COLLECTION"),
+        ("LOCAL_FILE_COLLECTION_ZIP", "LOCAL_FILE_COLLECTION"),
+    ):
+        inventory = parse_native_source(
+            inventory_zip.getvalue(), parser, {"asset_class": asset_class, "platform": "Local"}
+        )
+        validate_native_source_record(inventory)
+        if inventory["record"]["file_count"] != 1:
+            raise AssertionError("inventory parser lost a file entry")
+        for key, value in (("body", "UNSELECTED_BODY"), ("size_bytes", -1)):
+            invalid = deepcopy(inventory)
+            invalid["record"]["entries"][0][key] = value
+            try:
+                validate_native_source_record(invalid)
+            except NativeSourceExportError:
+                pass
+            else:
+                raise AssertionError("inventory contract accepted content or invalid size")
     asset_catalog_source = _asset_catalog_source()
     validate_asset_catalog_source(asset_catalog_source)
     promoted_catalog = deepcopy(asset_catalog_source)
@@ -1062,7 +1086,7 @@ def main() -> None:
         "workbench_contracts=1 negative_workbench_vectors=2 "
         "real_asset_policy_vectors=2 asset_catalog_policy_vectors=2 "
         "connector_grant_policy_vectors=2 local_source_export_policy_vectors=2 "
-        "native_source_records=1 native_source_policy_vectors=2"
+        "native_source_records=3 native_source_policy_vectors=6"
     )
 
 

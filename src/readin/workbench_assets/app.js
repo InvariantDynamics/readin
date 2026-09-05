@@ -526,7 +526,7 @@ function renderSetup(asset) {
     <li><span class="audit-index">03</span><div><strong>Track asset</strong><small>Entity and tracking records replay into the catalog</small></div>${stateTag("TRACKED")}</li>
     <li><span class="audit-index">04</span><div><strong>Record connector intent</strong><small>Capabilities are represented as states, not credentials or sessions</small></div>${stateTag(setup.connection_state)}</li>
     <li><span class="audit-index">05</span><div><strong>Record connector grant</strong><small>Scope, minimization, retention, revocation, and output observations are contracted separately</small></div>${stateTag(setup.connector_grant_state)}</li>
-    <li><span class="audit-index">06</span><div><strong>Import local profile records</strong><small>Preview a prepared export, validate its grant, and admit source observations</small></div>${stateTag(importedCount ? `${importedCount} RECORDS` : "AWAITING_EXPORT")}</li>
+    <li><span class="audit-index">06</span><div><strong>Import selected source records</strong><small>Preview a supported export, validate its grant, and admit source observations</small></div>${stateTag(importedCount ? `${importedCount} RECORDS` : "AWAITING_EXPORT")}</li>
   </ol>`;
 
   const importsBody = sourceExports.length
@@ -544,10 +544,15 @@ function renderSetup(asset) {
           ["Selected source fields", batch.selected_source_fields?.join(", ") || "Prepared record fields"],
           ["Excluded fields", batch.excluded_field_count ?? "Not applicable"],
           ["Skipped archive entries", batch.archive_entries_skipped ?? "Not applicable"],
+          ...(batch.file_entry_count != null ? [
+            ["File entries in this snapshot", batch.file_entry_count],
+            ["Archive entry names retained", "Yes — included in preview"],
+            ["Member content verification", batch.content_verification],
+          ] : []),
         ])}
       </div>`).join("")
-    : `<p>No profile records imported yet. The local importer accepts prepared JSON containing your platform, account identifier, display name, and optional catalog-matched profile URL.</p>
-       <p>Use a local-export grant with profile metadata scope and user-managed source retention. Native provider ZIP and CSV archives need a source-specific parser.</p>`;
+    : `<p>No source records imported yet. Open Sources to see the formats supported for this asset and the required metadata scope.</p>
+       <p>Use a matching local-export grant and keep the selected export private outside Git. Preview selected fields before admitting them.</p>`;
 
   return `<div class="overview-grid">
     ${sectionCard("Asset source setup", setup.connection_state, setupBody, true)}
@@ -683,15 +688,36 @@ function renderClaims(asset) {
   return sectionCard("Claims", "unresolved epistemic objects", `<ul class="record-list">${rows}</ul>`, true);
 }
 
+function renderFileInventory(record, observationId) {
+  const filterId = `inventory-filter-${observationId}`;
+  const fileCount = escapeHtml(record.file_count);
+  const rows = record.entries.map((entry) => `<tr data-inventory-entry>
+    <th scope="row">${escapeHtml(entry.entry_name)}</th>
+    <td>${escapeHtml(formatBytes(entry.size_bytes))}</td><td><code>${escapeHtml(entry.crc32)}</code></td>
+  </tr>`).join("");
+  return `<div class="file-inventory">
+    <div class="inventory-summary"><strong>${fileCount} file entries · ${escapeHtml(formatBytes(record.total_declared_bytes))} declared</strong>
+      <span>One inventory observation; files are not separate tracked assets.</span></div>
+    <p>Archive names are retained. Sizes and CRC32 are ZIP-declared metadata, not verified contents or cryptographic file identities. No member contents were decompressed or admitted.</p>
+    <label for="${escapeHtml(filterId)}">Filter file entries</label>
+    <input id="${escapeHtml(filterId)}" type="search" data-inventory-filter placeholder="Find an archive entry…" autocomplete="off">
+    <p data-inventory-count role="status" aria-live="polite">${fileCount} of ${fileCount} entries</p>
+    <div class="source-table-wrap inventory-table-wrap"><table class="source-table inventory-table">
+      <thead><tr><th>Archive entry</th><th>Declared size</th><th>Declared CRC32</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+  </div>`;
+}
+
 function renderEvidence(asset) {
   const profileRecords = asset.evidence.observations.filter(
     (item) => ["local-source-export-batch", "native-local-source-export"].includes(item.provenance.adapter),
   );
   const profileBody = profileRecords.map((item) => {
     const payload = item.content.structured_payload;
+    const inventory = payload.record?.inventory_kind === "ZIP_CENTRAL_DIRECTORY_METADATA";
     return `<div class="collection-boundary">
-      <div><span>${escapeHtml(item.observation_type)}</span><strong>${escapeHtml(payload.record?.display_name ?? payload.record?.full_name ?? "Imported record")}</strong></div>
-      ${factList(Object.entries(payload.record ?? {}).map(([key, value]) => [titleCase(key), value]))}
+      <div><span>${escapeHtml(item.observation_type)}</span><strong>${escapeHtml(payload.record?.display_name ?? payload.record?.full_name ?? (inventory ? "Selected-file inventory" : "Imported record"))}</strong></div>
+      ${inventory ? renderFileInventory(payload.record, item.id) : factList(Object.entries(payload.record ?? {}).map(([key, value]) => [titleCase(key), value]))}
       ${factList([
         ["Observed", item.observed_at],
         ["Observation ID", item.id],
@@ -1119,6 +1145,18 @@ async function loadSnapshot(assetId = null) {
 }
 
 if (document.documentElement.dataset.launchMode === "served") {
+  byId("view-panel").addEventListener("input", (event) => {
+    if (!event.target.matches("[data-inventory-filter]")) return;
+    const inventory = event.target.closest(".file-inventory");
+    const query = event.target.value.trim().toLocaleLowerCase();
+    const rows = [...inventory.querySelectorAll("[data-inventory-entry]")];
+    let visible = 0;
+    rows.forEach((row) => {
+      row.hidden = !row.querySelector("th").textContent.toLocaleLowerCase().includes(query);
+      if (!row.hidden) visible += 1;
+    });
+    inventory.querySelector("[data-inventory-count]").textContent = `${visible} of ${rows.length} entries`;
+  });
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.activeTab = button.dataset.tab;
