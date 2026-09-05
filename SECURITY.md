@@ -72,6 +72,17 @@ invokes the network collector or claims its HTTP provenance. H3's private-file a
 also govern H4. Capability/readiness labels do not establish file validity, source coverage, a
 connected account, or live synchronization.
 
+H5 adds ZIP central-directory inventories for owned document/local-file collections. The full raw
+archive is hashed, but member content is never decompressed, admitted or verified. Entry names,
+declared sizes and CRC32 are retained; CRC32 is not a verified cryptographic file identity. The
+archive's local filesystem path stays excluded, but **relative entry names can be sensitive** and
+must be reviewed during preview. No semantic filename/secret detection is claimed. Directory entries
+are skipped; hidden/OS metadata files are included. The parser rejects unsafe/ambiguous paths,
+special-file types, encrypted entries and exceeded metadata bounds. It does not validate member
+content or malware safety. Limits: 64 MiB raw ZIP, 2048 entries, 512-character names, 1 TiB total
+declared bytes. Names are HTML-escaped in the read-only inventory table. Existing local source
+privacy, matching-grant, attestation and user-managed-retention controls still apply.
+
 The loopback workbench has no authentication. It accepts only numeric `127.0.0.1` or `::1` listener
 bindings, verifies the bound socket is loopback, validates `Host` and `Origin`, and refuses mutation
 methods, but should still be treated as a same-user local presentation surface.

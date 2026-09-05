@@ -618,12 +618,65 @@ grant selects `OWNED_REPOSITORY_METADATA` and `github.public_repository_metadata
 The file must be a saved public [Get a repository response](https://docs.github.com/en/rest/repos/repos#get-a-repository);
 this command does not call GitHub, authenticate the file's origin, or import private repositories.
 
-**Operational coverage:** H4 supports the listed social-profile and repository formats. Email,
-calendar, financial accounts, documents, devices, and other classes are catalogable but do not yet
-have native importers. Account login, synchronization, and monitoring are not implemented. The
-existing H0 exact-target public repository request remains a separate case-policy workflow.
+**Operational coverage:** H4 supports the listed social-profile and repository formats; H5 below
+adds owned-document and local-file ZIP inventories. Email, calendar, financial accounts, devices,
+and other classes still lack native importers. Account login, synchronization, and monitoring are
+not implemented. The existing H0 exact-target public repository request remains a separate
+case-policy workflow.
 See [ADR 0021](docs/adr/0021-native-export-parsers-and-source-coverage.md) for field boundaries,
 archive limits, provenance, and the path toward broader source coverage.
+
+## H5: Import an inventory of selected documents or local files
+
+Use a ZIP containing only files you choose to catalog. READIN inventories its central-directory
+metadata; it does not scan folders, extract files, read member contents, or index document text.
+Create an asset with class `DOCUMENT_COLLECTION` or `LOCAL_FILE_COLLECTION`, a descriptive platform
+label such as `Local`, and `LOCAL_EXPORT_IMPORT_ONLY` collection mode using the H1 catalog workflow.
+The connector intent uses `LOCAL_EXPORT`, `EXPORT_IMPORT_READY`, and OAuth `NOT_REQUIRED`.
+
+| Catalog class | Parser | Imported record |
+| --- | --- | --- |
+| `DOCUMENT_COLLECTION` | `DOCUMENT_COLLECTION_ZIP` | `document.inventory_metadata.imported` |
+| `LOCAL_FILE_COLLECTION` | `LOCAL_FILE_COLLECTION_ZIP` | `file.inventory_metadata.imported` |
+
+Both require a `LOCAL_EXPORT_ONLY` grant with `OWNED_DOCUMENT_METADATA` scope and the exact output
+type above. Use `prepare-native-source-grant` as in H4, review its output and record it with
+`record-connector-grant --attest`. Grant generation does not write a file or record consent.
+
+Keep the ZIP owner-only (`chmod 600` on the exact selected file), outside a Git checkout. With the
+ledger path, asset and grant IDs from setup, preview in Terminal:
+
+```shell
+uv run readin import-native-source-export \
+  --ledger "$READIN_LEDGER" \
+  --asset "$READIN_ASSET_ID" \
+  --grant "$READIN_GRANT_ID" \
+  --parser DOCUMENT_COLLECTION_ZIP \
+  --source '/absolute/path/to/selected-documents.zip' \
+  --observed-at '2026-09-04T14:00:00-05:00' \
+  --preview
+```
+
+Replace the example timestamp with the export's operator-declared observation time. **Review every
+entry name:** the archive's filesystem path is excluded, but relative entry names are retained in
+the append-only ledger. Remove or rename sensitive entries before making the selected archive;
+the parser is not a semantic secret detector. Once satisfied, replace `--preview` with `--attest`.
+Use `LOCAL_FILE_COLLECTION_ZIP` for the local-file class.
+
+Open **Evidence** to filter the imported entries by name. Each row shows archive-declared size and
+CRC32, not a verified file digest. One ZIP is one inventory observation of the collection; its files
+are not automatically separate tracked assets, and a later ZIP is a new snapshot rather than a
+deduplicated document set. Preview, same-file retry, and grant-bound receipts use the H4 mechanism.
+
+Limits: 64 MiB ZIP, 2048 entries including directories, 512-character relative names, and 1 TiB
+total declared uncompressed bytes. Directories are skipped; hidden/OS metadata file entries are
+included. Unsafe paths, ambiguous names, special-file entries and encrypted entries are rejected.
+No member decompression or content verification occurs, including for high-compression files.
+See [ADR 0022](docs/adr/0022-owned-file-inventory-admission.md) for the exact metadata/privacy contract.
+
+**Coverage is now four of eleven catalog classes for listed formats**, not all-signal collection.
+Saved archives remain user-managed. Live account connection, content indexing, calendar/mail
+importers, and automatic claims are not provided by this slice.
 
 ## Quick start
 

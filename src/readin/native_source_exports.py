@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import stat
+import unicodedata
 import zipfile
 import zlib
 from copy import deepcopy
@@ -76,7 +77,35 @@ PARSERS = {
         "media_type": "application/json",
         "max_bytes": MAX_MEMBER_BYTES,
     },
+    "DOCUMENT_COLLECTION_ZIP": {
+        "label": "Document ZIP inventory (metadata only)",
+        "asset_class": "DOCUMENT_COLLECTION",
+        "platform": None,
+        "data_category": "OWNED_DOCUMENT_METADATA",
+        "observation_type": "document.inventory_metadata.imported",
+        "media_type": "application/zip",
+        "max_bytes": MAX_ARCHIVE_BYTES,
+    },
+    "LOCAL_FILE_COLLECTION_ZIP": {
+        "label": "Local-file ZIP inventory (metadata only)",
+        "asset_class": "LOCAL_FILE_COLLECTION",
+        "platform": None,
+        "data_category": "OWNED_DOCUMENT_METADATA",
+        "observation_type": "file.inventory_metadata.imported",
+        "media_type": "application/zip",
+        "max_bytes": MAX_ARCHIVE_BYTES,
+    },
 }
+INVENTORY_PARSERS = frozenset({"DOCUMENT_COLLECTION_ZIP", "LOCAL_FILE_COLLECTION_ZIP"})
+INVENTORY_EXCLUDED_FIELDS = (
+    "date_time",
+    "compress_type",
+    "compress_size",
+    "external_attr",
+    "internal_attr",
+    "comment",
+    "extra",
+)
 
 
 class NativeSourceExportError(LocalSourceExportError):
@@ -101,6 +130,25 @@ def validate_native_source_record(record: JsonObject) -> None:
     )
     if not validator.is_valid(record):
         raise NativeSourceExportError("native parser output violates the closed record contract")
+    if record["parser"] in INVENTORY_PARSERS:
+        inventory = record["record"]
+        entries = inventory["entries"]
+        names = [row["entry_name"] for row in entries]
+        keys = [unicodedata.normalize("NFC", name).casefold() for name in names]
+        if (
+            inventory["file_count"] != len(entries)
+            or inventory["total_declared_bytes"] != sum(row["size_bytes"] for row in entries)
+            or len(set(keys)) != len(keys)
+            or any(not _safe_inventory_name(name) or name.endswith("/") for name in names)
+            or any(
+                "/".join(key.split("/")[:i]) in keys
+                for key in keys
+                for i in range(1, len(key.split("/")))
+            )
+            or record["excluded_field_count"] != len(entries) * len(INVENTORY_EXCLUDED_FIELDS)
+            or len(entries) + record["archive_entries_skipped"] > MAX_ARCHIVE_ENTRIES
+        ):
+            raise NativeSourceExportError("inventory record has inconsistent names or counts")
 
 
 def parser_spec(parser: str) -> JsonObject:
@@ -123,7 +171,10 @@ def prepare_native_source_grant(
     binding = projection.entities[asset_id]["attributes"].get("asset_catalog_binding", {})
     if (
         binding.get("asset_class") != spec["asset_class"]
-        or binding.get("platform", "").casefold() != spec["platform"].casefold()
+        or (
+            spec["platform"] is not None
+            and binding.get("platform", "").casefold() != spec["platform"].casefold()
+        )
         or binding.get("collection_mode")
         not in {"LOCAL_EXPORT_IMPORT_ONLY", "API_CONNECTION_REQUIRES_SEPARATE_GRANT"}
     ):
@@ -290,11 +341,85 @@ def _profile_from_zip(raw: bytes) -> tuple[bytes, int]:
         ) from error
 
 
+def _safe_inventory_name(name: str) -> bool:
+    return (
+        bool(name)
+        and len(name) <= 512
+        and not (
+            any(part in {"", ".", ".."} for part in name.removesuffix("/").split("/"))
+            or "\\" in name
+            or ":" in name
+            or any(unicodedata.category(c).startswith("C") for c in name)
+        )
+    )
+
+
+def _zip_inventory(raw: bytes) -> tuple[JsonObject, int]:
+    """Inventory central-directory metadata only. Never open/decompress a member."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            members = archive.infolist()
+            if len(members) > MAX_ARCHIVE_ENTRIES:
+                raise NativeSourceExportError("inventory archive exceeds 2048 entries")
+            rows = []
+            seen = set()
+            directories = 0
+            for entry in members:
+                name = entry.orig_filename
+                mode = entry.external_attr >> 16
+                if (
+                    not _safe_inventory_name(name)
+                    or stat.S_IFMT(mode) not in {0, stat.S_IFREG, stat.S_IFDIR}
+                    or (stat.S_ISDIR(mode) and not entry.is_dir())
+                    or (stat.S_ISREG(mode) and entry.is_dir())
+                ):
+                    raise NativeSourceExportError("inventory contains an unsafe entry name or type")
+                # Case/Unicode aliases are ambiguous across common Mac filesystems.
+                key = unicodedata.normalize("NFC", name.removesuffix("/")).casefold()
+                if key in seen:
+                    raise NativeSourceExportError(
+                        "inventory contains duplicate or ambiguous entries"
+                    )
+                seen.add(key)
+                if entry.flag_bits & 1:
+                    raise NativeSourceExportError("encrypted inventory entries are unsupported")
+                if entry.is_dir():
+                    if entry.file_size != 0:
+                        raise NativeSourceExportError("inventory directory declares file content")
+                    directories += 1
+                    continue
+                rows.append(
+                    {
+                        "entry_name": name,
+                        "size_bytes": entry.file_size,
+                        "crc32": f"{entry.CRC:08x}",
+                    }
+                )
+            if not rows:
+                raise NativeSourceExportError("inventory requires at least one file entry")
+            file_keys = {unicodedata.normalize("NFC", row["entry_name"]).casefold() for row in rows}
+            for key in seen:
+                parts = key.split("/")
+                if any("/".join(parts[:i]) in file_keys for i in range(1, len(parts))):
+                    raise NativeSourceExportError("inventory file conflicts with a directory path")
+            return {
+                "inventory_kind": "ZIP_CENTRAL_DIRECTORY_METADATA",
+                "content_verification": "NOT_PERFORMED",
+                "file_count": len(rows),
+                "total_declared_bytes": sum(row["size_bytes"] for row in rows),
+                "entries": sorted(rows, key=lambda row: row["entry_name"]),
+            }, directories
+    except (zipfile.BadZipFile, UnicodeError, OSError, EOFError, ValueError) as error:
+        if isinstance(error, NativeSourceExportError):
+            raise
+        raise NativeSourceExportError("could not read inventory ZIP metadata") from error
+
+
 def parse_native_source(raw: bytes, parser: str, binding: JsonObject) -> JsonObject:
     spec = parser_spec(parser)
-    if (
-        binding.get("asset_class") != spec["asset_class"]
-        or binding.get("platform", "").casefold() != spec["platform"].casefold()
+    if binding.get("asset_class") != spec["asset_class"] or (
+        spec["platform"] is not None
+        and binding.get("platform", "").casefold() != spec["platform"].casefold()
     ):
         raise NativeSourceExportError("parser does not match catalog asset class and platform")
     if len(raw) > spec["max_bytes"]:
@@ -313,7 +438,7 @@ def parse_native_source(raw: bytes, parser: str, binding: JsonObject) -> JsonObj
         result["record"], result["excluded_field_count"] = _profile_csv(selected)
         result["selected_source_fields"] = ["First Name", "Last Name"]
         result["identity_binding"] = "USER_ATTESTED_CATALOG_ASSOCIATION"
-    else:
+    elif parser == "GITHUB_REPOSITORY_JSON":
         parts = binding.get("account_identifier", "").split("/")
         if len(parts) != 2:
             raise NativeSourceExportError(
@@ -332,6 +457,14 @@ def parse_native_source(raw: bytes, parser: str, binding: JsonObject) -> JsonObj
         result["selected_source_fields"] = sorted(result["record"])
         result["excluded_field_count"] = len(payload) - len(result["record"])
         result["identity_binding"] = "SOURCE_IDENTIFIER_MATCHED_NOT_AUTHENTICATED"
+    elif parser in INVENTORY_PARSERS:
+        result["record"], result["archive_entries_skipped"] = _zip_inventory(raw)
+        result["selected_source_fields"] = ["filename", "file_size", "CRC"]
+        # Count these named exclusions, not every ZIP-format field or excluded byte.
+        result["excluded_field_count"] = result["record"]["file_count"] * len(
+            INVENTORY_EXCLUDED_FIELDS
+        )
+        result["identity_binding"] = "USER_ATTESTED_CATALOG_ASSOCIATION"
     validate_native_source_record(result)
     return result
 
@@ -384,6 +517,18 @@ def _build_events(
         "archive_entries_skipped": parsed["archive_entries_skipped"],
         "selected_member_sha256": parsed["selected_member_sha256"],
     }
+    inventory = parser in INVENTORY_PARSERS
+    if inventory:
+        receipt.update(
+            {
+                "archive_entry_names_recorded": True,
+                "file_entry_count": parsed["record"]["file_count"],
+                "member_content_read": False,
+                "content_verification": "NOT_PERFORMED",
+                "excluded_field_count_basis": "SEVEN_UNSELECTED_ZIPINFO_FIELDS_PER_FILE",
+                "excluded_source_fields": list(INVENTORY_EXCLUDED_FIELDS),
+            }
+        )
     return [
         create_observer_frame_registered(
             spec["label"],
@@ -398,6 +543,11 @@ def _build_events(
                 "Provider origin and ownership are not independently authenticated",
                 "Unselected fields and archive members provide no coverage",
                 "Observation time is supplied by the operator",
+            )
+            + (
+                ("ZIP sizes and CRC32 are archive-declared, not verified file contents",)
+                if inventory
+                else ()
             ),
             validity_conditions=(uri, parsed["identity_binding"]),
             frame_id=frame_id,
@@ -454,7 +604,7 @@ def native_grant(
         observation_type=spec["observation_type"],
         validate_profile=False,
     )
-    if grant["platform"].casefold() != spec["platform"].casefold():
+    if spec["platform"] is not None and grant["platform"].casefold() != spec["platform"].casefold():
         raise NativeSourceExportError("parser platform does not match grant")
     return observation, grant
 

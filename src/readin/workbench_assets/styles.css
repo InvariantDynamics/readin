@@ -1072,6 +1072,15 @@ p {
 .source-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
 .source-table th, .source-table td { padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .source-table td:last-child { min-width: 210px; }
+.inventory-summary { display: flex; flex-direction: column; gap: 6px; }
+.inventory-summary span, .file-inventory p { color: var(--muted); font-size: 12px; }
+.file-inventory label { display: block; margin-bottom: 6px; font-size: 12px; }
+.file-inventory input { width: min(100%, 420px); padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px; color: inherit; background: var(--panel); }
+.inventory-table-wrap { max-height: 420px; overflow: auto; }
+.inventory-table th:first-child { overflow-wrap: anywhere; min-width: 180px; }
+.inventory-table thead { position: sticky; top: 0; background: var(--panel); }
+.inventory-table td:last-child { min-width: 110px; }
+.inventory-table tr[hidden] { display: none; }
 .source-command { margin-top: 14px; }
 .source-command summary { cursor: pointer; padding: 10px 0; }
 .source-command pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.6; }
